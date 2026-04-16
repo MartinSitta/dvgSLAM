@@ -11,7 +11,6 @@ extern "C" {
 #include <stddef.h>                                                             
 #include <stdbool.h>
 #include <assert.h>
-
 #define ALT_CHUNK_ARR_SIZE 1024
 #define ALT_CHUNK_LEN 16
 

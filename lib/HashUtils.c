@@ -17,7 +17,11 @@ uint32_t build_chunk_hash_table_hash(int64_t x, int64_t y, int64_t z, uint32_t s
     MurmurHash3_x86_32((void*)&coords, byte_len, seed, &output);
     return output;
 }
-
+uint64_t build_fibonacci_hash_from_coords(int64_t x, int64_t y, int64_t z){
+    int64_t buf[3] = {x, y, z};
+    uint64_t hash = fibonacci_hash((uint8_t*)buf, sizeof(buf));
+    return hash;
+}
 uint16_t build_node_hash_table_hash(uint16_t coords, uint32_t seed){
     assert(seed != 0);
     uint32_t output = 0;

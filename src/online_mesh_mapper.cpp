@@ -20,6 +20,11 @@
 #include <tf2/convert.h>
 #include <tf2/transform_datatypes.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
+#include <pcl/point_types.h>
+#include <pcl/point_cloud.h>
+#include <pcl/conversions.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/registration/icp.h>
 #include "../lib/VoxelGraph.h"
 #include "mesh_msgs/msg/mesh_geometry_stamped.hpp"
 // ROS / messages

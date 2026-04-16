@@ -1,6 +1,7 @@
 #include "AltChunk.h"
 
 int64_t alt_chunk_build_anchor_coord(int64_t coord){
+    /*old implementation
     if(coord >= 0){                                                             
         int64_t ret_val = (coord / ALT_CHUNK_LEN) * ALT_CHUNK_LEN;                    
         return ret_val;                                                         
@@ -12,6 +13,8 @@ int64_t alt_chunk_build_anchor_coord(int64_t coord){
         int64_t ret_val = ((coord / ALT_CHUNK_LEN) * ALT_CHUNK_LEN) - (ALT_CHUNK_LEN);   
         return ret_val;                                                         
     }         
+    */
+    return coord & ~15LL;
 }
 void alt_chunk_init(AltChunk_t* chunk){
     assert(chunk != NULL);
@@ -26,7 +29,7 @@ void alt_chunk_init(AltChunk_t* chunk){
 }
 
 void alt_chunk_insert(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z){
-    assert(chunk != NULL);;;;
+    assert(chunk != NULL);
     int16_t rel_x = x - chunk->x_offset;
     int16_t rel_y = y - chunk->y_offset;
     int16_t rel_z = z - chunk->z_offset;

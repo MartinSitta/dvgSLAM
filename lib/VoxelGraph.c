@@ -1,6 +1,5 @@
 #include "VoxelGraph.h"
 #include <assert.h>
-#include "HashUtils.h"
 #include <stdio.h>
 //helper functions
 void voxel_graph_init_arrays(VoxelGraph_t* graph){
@@ -17,7 +16,8 @@ VoxelGraph_t* voxel_graph_init(uint32_t chunk_count){
     uint32_t chunk_hash_table_size = chunk_count * 2;
     VoxelGraph_t* output = malloc(sizeof(VoxelGraph_t));
     output->chunk_amount = chunk_count;
-    output->chunk_hash_table = NULL;
+    output->total_hash_table_insertions = 0;
+    output->total_hash_collisions = 0;
     if(((chunk_hash_table_size) & (chunk_hash_table_size - 1)) != 0){
         bool val_found = false;
         for(uint32_t i = 1; (i < (i << 31)) && !val_found; i << 1){
@@ -110,15 +110,17 @@ AltChunk_t* voxel_graph_chunk_hash_table_lookup(VoxelGraph_t* graph, int64_t x, 
     int64_t chunk_anchor_y = alt_chunk_build_anchor_coord(y);
     int64_t chunk_anchor_z = alt_chunk_build_anchor_coord(z);
     //printf("building hash\n");
-    uint32_t hash_table_entry =  build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 1586102333);
-    hash_table_entry = hash_table_entry & (graph->chunk_hash_table_size - 1);
+    //uint64_t hash =  build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 1586102333);//murmur implementation
+    uint64_t hash = build_fibonacci_hash_from_coords(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z);//fibonacci implementation
+    uint64_t hash_table_entry = hash & (graph->chunk_hash_table_size - 1);
     assert(hash_table_entry < graph->chunk_hash_table_size);
     //printf("building double_hash\n");
     uint64_t double_hash = 0;
-    uint64_t double_hash_val = build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 2734158491);
+    uint64_t base_double_hash = fibonacci_doublehash(hash);//fibonacci implementation
+    //uint64_t base_double_hash = build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 2734158491);//murmur implementation
     //printf("performing double hash hashtable lookups\n");
     for(uint32_t i = 0; i < 10; i++){
-        double_hash = ((uint64_t)hash_table_entry + ((i * double_hash_val))) % graph->chunk_hash_table_size;
+        double_hash = (hash + (i * base_double_hash)) % graph->chunk_hash_table_size;
         assert(double_hash < graph->chunk_hash_table_size);
         if(graph->chunk_hash_table[double_hash] == NULL){
             return NULL;
@@ -139,9 +141,11 @@ AltChunk_t* voxel_graph_chunk_hash_table_request(VoxelGraph_t* graph, int64_t x,
     int64_t chunk_anchor_y = alt_chunk_build_anchor_coord(y);
     int64_t chunk_anchor_z = alt_chunk_build_anchor_coord(z);
     //printf("building hash\n");
-    uint32_t hash_table_entry =  build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 1586102333);
-    hash_table_entry = hash_table_entry & (graph->chunk_hash_table_size - 1);
+    //uint64_t hash =  build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 1586102333);//murmur implementation
+    uint64_t hash = build_fibonacci_hash_from_coords(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z);//fibonacci implementation
+    uint64_t hash_table_entry = hash & (graph->chunk_hash_table_size - 1);
     assert(hash_table_entry < graph->chunk_hash_table_size);
+    bool prev_hash_collision = false;
     //printf("performing intial hashtable lookup\n");
     if(graph->chunk_hash_table[hash_table_entry] == NULL){
         AltChunk_t* chunk = voxel_graph_create_chunk(graph, x, y, z);
@@ -149,21 +153,27 @@ AltChunk_t* voxel_graph_chunk_hash_table_request(VoxelGraph_t* graph, int64_t x,
             return NULL;
         }
         graph->chunk_hash_table[hash_table_entry] = chunk;
+        graph->total_hash_table_insertions++;
         return chunk;
     }
     else{
         //printf("building double_hash\n");
         uint64_t double_hash = 0;
-        uint64_t double_hash_val = build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 2734158491);
+        uint64_t base_double_hash = fibonacci_doublehash(hash);//fibonacci implementation
+        //uint64_t base_double_hash = build_chunk_hash_table_hash(chunk_anchor_x, chunk_anchor_y, chunk_anchor_z, 2734158491);//murmur implementation
         //printf("performing double hash hashtable lookups\n");
         for(uint32_t i = 0; i < 10; i++){
-            double_hash = ((uint64_t)hash_table_entry + ((i * double_hash_val))) % graph->chunk_hash_table_size;
+            double_hash = (hash + (i * base_double_hash)) % graph->chunk_hash_table_size;
             if(graph->chunk_hash_table[double_hash] == NULL){
                 AltChunk_t* chunk = voxel_graph_create_chunk(graph, x, y, z);
                 if(chunk == NULL){
                     return NULL;
                 }
                 graph->chunk_hash_table[double_hash] = chunk;
+                graph->total_hash_table_insertions++;
+                if(prev_hash_collision){
+                    graph->total_hash_collisions++;
+                }
                 return chunk;
             }
             else{
@@ -172,6 +182,9 @@ AltChunk_t* voxel_graph_chunk_hash_table_request(VoxelGraph_t* graph, int64_t x,
                         chunk->y_offset == chunk_anchor_y &&
                         chunk->z_offset == chunk_anchor_z){
                     return chunk;
+                }
+                else{
+                    prev_hash_collision = true;
                 }
             }
         }

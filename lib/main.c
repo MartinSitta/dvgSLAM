@@ -158,6 +158,9 @@ int main(){
     assert(!vertex_get_foward_bit(&chunk->nodes[chunk_node_index_1].coord_and_mesh_info));
     assert(!vertex_get_back_bit(&chunk_three->nodes[chunk_node_index_2].coord_and_mesh_info));
     */
+    printf("checking hashing metrics logic\n");
+    assert(graph->total_hash_table_insertions != graph->total_hash_collisions);
+    printf("%ld insertions have been performed, %ld hash collosions have occurred\n", graph->total_hash_table_insertions, graph->total_hash_collisions);
     voxel_graph_free(&graph);
     printf("all tests passed\n");
     return 0;

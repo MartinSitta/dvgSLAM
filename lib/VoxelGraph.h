@@ -10,10 +10,13 @@ extern "C"{
 #include <stdlib.h>
 #include <assert.h>
 #include <stdbool.h>
+#include "HashUtils.h"
 typedef struct{
     uint32_t chunk_amount;
     uint32_t chunk_hash_table_size;
     uint32_t current_chunk_index;
+    uint64_t total_hash_table_insertions;
+    uint64_t total_hash_collisions;
     //Chunk_t* chunks;
     AltChunk_t** chunk_hash_table;
 }VoxelGraph_t;
