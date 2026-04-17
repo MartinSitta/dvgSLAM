@@ -2377,7 +2377,12 @@ class OnlineMeshMapper : public rclcpp::Node{
         }
         pcl::Pointcloud<pcl::PointXYZ> corrected_cloud;
         Eigen::Matrix4f corrective_transform;
-        run_icp(input_cloud, map_cloud, global_point, &corrected_cloud, &corrective_transform);
+        bool converged = run_icp(input_cloud, map_cloud, global_point, &corrected_cloud, &corrective_transform);
+        if(!converged){
+            RCLCPP_ERROR(this->get_logger(), "Error in insertion of the octomap! Localization required!");
+            io_mutex.unlock();
+            return;
+        }
         const auto end = std::chrono::steady_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
         RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ns", diff.count());
