@@ -2339,17 +2339,16 @@ class OnlineMeshMapper : public rclcpp::Node{
     }
     bool run_icp(pcl::PointCloud<pcl::PointXYZ> input_cloud,
             pcl::PointCloud<pcl::PointXYZ> map_cloud,
-            geometry_msgs::msg::Point robot_pos,
-            pcl::PointCloud<pcl::PointXYZ>* corretected_cloud_out,
+            pcl::PointCloud<pcl::PointXYZ>* corrected_cloud_out,
             Eigen::Matrix4f* transform_out){
         pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>(input_cloud));
         pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>(map_cloud));
         
-        pcl::IterativeClosesPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-        icp::setMaxCorrespondenceDistance(2.0 / (double)scalar);
-        icp::setTransformationEpsilon(1e-8);//stop iterating when transform delta below
-        icp::setEuclideanFitnessEpsilon(1e-6);//stop iterating when mean squared error below
-        icp::setMaximumIterations(50);
+        pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+        icp.setMaxCorrespondenceDistance(2.0 / (double)scalar);
+        icp.setTransformationEpsilon(1e-8);//stop iterating when transform delta below
+        icp.setEuclideanFitnessEpsilon(1e-6);//stop iterating when mean squared error below
+        icp.setMaximumIterations(50);
         icp.setInputSource(source);
         icp.setInputSource(target);
 
@@ -2357,18 +2356,19 @@ class OnlineMeshMapper : public rclcpp::Node{
         icp.align(*aligned);
         
         if(!icp.hasConverged()){
-            RCLCPP_ERROR(this->get_logger()m "ICP did not converge!");
+            RCLCPP_ERROR(this->get_logger(), "ICP did not converge!");
             return false;
         }
 
         double fitness = icp.getFitnessScore();
         double fitness_threshold = 0.1 / (double) scalar;
         if(fitness > fitness_threshold){
-            RCLCPP_ERROR(this->get_logger(), "ICP fitness score is too bad: %d", fitness);
+            RCLCPP_ERROR(this->get_logger(), "ICP fitness score is too bad: %f", fitness);
             return false;
         }
         *corrected_cloud_out = *aligned;
         *transform_out = icp.getFinalTransformation();
+        return true;
     }
     void octomap_bin_callback(const octomap_msgs::msg::Octomap::SharedPtr msg){
         io_mutex.lock();
@@ -2407,9 +2407,9 @@ class OnlineMeshMapper : public rclcpp::Node{
             io_mutex.unlock();
             return;
         }
-        pcl::Pointcloud<pcl::PointXYZ> corrected_cloud;
+        pcl::PointCloud<pcl::PointXYZ> corrected_cloud;
         Eigen::Matrix4f corrective_transform;
-        bool converged = run_icp(input_cloud, map_cloud, global_point, &corrected_cloud, &corrective_transform);
+        bool converged = run_icp(input_cloud, map_cloud, &corrected_cloud, &corrective_transform);
         if(!converged){
             RCLCPP_ERROR(this->get_logger(), "Error in insertion of the octomap! Localization required!");
             io_mutex.unlock();
