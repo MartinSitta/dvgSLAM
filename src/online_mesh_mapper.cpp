@@ -2319,14 +2319,9 @@ class OnlineMeshMapper : public rclcpp::Node{
             int64_t z_point = p.z;
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
-        Eigen::Vector4f prev_pose(
-                global_point.position.x,
-                global_point.position.y,
-                global_point.position.z, 1.0f);
-        Eigen::Vector4f corrected_pose = corrective_transform * prev_pose;
-        global_point.position.x = corrected_pose.x();
-        global_point.position.y = corrected_pose.y();
-        global_point.position.z = corrected_pose.z();
+        global_point.position.x += corrective_transform(0,3) / scalar;
+        global_point.position.y += corrective_transform(1,3) / scalar;
+        global_point.position.z += corrective_transform(2,3) / scalar;
         const auto end = std::chrono::steady_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
         RCLCPP_INFO(this->get_logger(), "entering the pointcloud took %ld ns", diff.count());
@@ -2397,10 +2392,10 @@ class OnlineMeshMapper : public rclcpp::Node{
                 prev_odom_msg_pose.orientation.y,
                 prev_odom_msg_pose.orientation.z);
         Eigen::Quaternionf q_current(
-                prev_odom_msg_pose.orientation.w,
-                prev_odom_msg_pose.orientation.x,
-                prev_odom_msg_pose.orientation.y,
-                prev_odom_msg_pose.orientation.z);
+                current_odom_msg_pose.orientation.w,
+                current_odom_msg_pose.orientation.x,
+                current_odom_msg_pose.orientation.y,
+                current_odom_msg_pose.orientation.z);
         Eigen::Quaternionf q_delta = q_current * q_prev.inverse();
         q_delta.normalize();
 
@@ -2441,12 +2436,12 @@ class OnlineMeshMapper : public rclcpp::Node{
         int64_t converted_radius = radius * (float)scalar;
         int64_t hor_chunk_radius = converted_radius / ALT_CHUNK_LEN;
         int64_t vert_chunk_radius = converted_radius / ALT_CHUNK_LEN;
-        int64_t x_neg_target = map_pose.position.x - hor_chunk_radius * ALT_CHUNK_LEN;
-        int64_t x_pos_target = map_pose.position.x + hor_chunk_radius * ALT_CHUNK_LEN;
-        int64_t y_neg_target = map_pose.position.y - hor_chunk_radius * ALT_CHUNK_LEN;
-        int64_t y_pos_target = map_pose.position.y + hor_chunk_radius * ALT_CHUNK_LEN;
-        int64_t z_neg_target = map_pose.position.z - vert_chunk_radius * ALT_CHUNK_LEN;
-        int64_t z_pos_target = map_pose.position.z + vert_chunk_radius * ALT_CHUNK_LEN;
+        int64_t x_neg_target = (map_pose.position.x * scalar) - hor_chunk_radius * ALT_CHUNK_LEN;
+        int64_t x_pos_target = (map_pose.position.x * scalar) + hor_chunk_radius * ALT_CHUNK_LEN;
+        int64_t y_neg_target = (map_pose.position.y * scalar) - hor_chunk_radius * ALT_CHUNK_LEN;
+        int64_t y_pos_target = (map_pose.position.y * scalar) + hor_chunk_radius * ALT_CHUNK_LEN;
+        int64_t z_neg_target = (map_pose.position.z * scalar) - vert_chunk_radius * ALT_CHUNK_LEN;
+        int64_t z_pos_target = (map_pose.position.z * scalar) + vert_chunk_radius * ALT_CHUNK_LEN;
         std::vector<AltChunk_t*> chunk_ptrs;
         for(int64_t x = x_neg_target; x <= x_pos_target; x += ALT_CHUNK_LEN){
             for(int64_t y = y_neg_target; y <= y_pos_target; y += ALT_CHUNK_LEN){
@@ -2558,7 +2553,7 @@ class OnlineMeshMapper : public rclcpp::Node{
             else{
                 int64_t x = it.getX() * (float)scalar;
                 int64_t y = it.getY() * (float)scalar;
-                int64_t z = it.getY() * (float)scalar;
+                int64_t z = it.getZ() * (float)scalar;
                 voxel_graph_delete(graph, x, y, z);
             }
         }
@@ -2592,15 +2587,10 @@ class OnlineMeshMapper : public rclcpp::Node{
             int64_t z_point = p.z;
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
-        Eigen::Vector4f prev_pose_vector(
-                global_point.position.x * (float)scalar,
-                global_point.position.y * (float)scalar,
-                global_point.position.z * (float)scalar, 1.0f);
-        Eigen::Vector4f corrected_pose = corrective_transform * prev_pose_vector;
-        global_point.position.x = corrected_pose.x() / (float) scalar;
-        global_point.position.y = corrected_pose.y() / (float) scalar;
-        global_point.position.z = corrected_pose.z() / (float) scalar;
-
+        /*
+        global_point.position.x += corrective_transform(0,3) / (float)scalar;
+        global_point.position.y += corrective_transform(1,3) / (float)scalar;
+        global_point.position.z += corrective_transform(2,3) / (float)scalar;
         Eigen::Matrix3f rotation = corrective_transform.block<3,3>(0,0);
         Eigen::Quaternionf q_correction(rotation);
         Eigen::Quaternionf q_current(
@@ -2613,7 +2603,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         global_point.orientation.y = q_corrected.y();
         global_point.orientation.z = q_corrected.z();
         global_point.orientation.w = q_corrected.w();
-
+        */
 
         const auto end = std::chrono::steady_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
