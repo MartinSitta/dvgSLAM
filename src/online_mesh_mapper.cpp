@@ -2398,11 +2398,17 @@ class OnlineMeshMapper : public rclcpp::Node{
                 current_odom_msg_pose.orientation.z);
         Eigen::Quaternionf q_delta = q_current * q_prev.inverse();
         q_delta.normalize();
-
-        global_point.orientation.x = q_delta.x();
-        global_point.orientation.y = q_delta.y();
-        global_point.orientation.z = q_delta.z();
-        global_point.orientation.w = q_delta.w();
+        Eigen::Quaternionf q_global(
+                global_point.orientation.w,
+                global_point.orientation.x,
+                global_point.orientation.y,
+                global_point.orientation.z);
+        q_global = q_delta * q_global;
+        q_global.normalize();
+        global_point.orientation.x = q_global.x();
+        global_point.orientation.y = q_global.y();
+        global_point.orientation.z = q_global.z();
+        global_point.orientation.w = q_global.w();
 
         io_mutex.unlock();
         /*
