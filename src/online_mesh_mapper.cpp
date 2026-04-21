@@ -2496,10 +2496,10 @@ class OnlineMeshMapper : public rclcpp::Node{
         pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>(map_cloud));
         
         pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-        icp.setMaxCorrespondenceDistance(scalar / 2);
+        icp.setMaxCorrespondenceDistance(1 / scalar * 2);
         icp.setTransformationEpsilon(1e-8);//stop iterating when transform delta below
-        icp.setEuclideanFitnessEpsilon(1e-6);//stop iterating when mean squared error below
-        icp.setMaximumIterations(50);
+        icp.setEuclideanFitnessEpsilon(1e-8);//stop iterating when mean squared error below
+        icp.setMaximumIterations(200);
         icp.setInputSource(source);
         icp.setInputTarget(target);
         
@@ -2521,7 +2521,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         }
 
         double fitness = icp.getFitnessScore(2.0f);
-        double fitness_threshold = 1.0f / (float)(scalar / 3);
+        double fitness_threshold = 1.0f / (float)(scalar / 2);
         if(fitness > fitness_threshold){
             RCLCPP_ERROR(this->get_logger(), "ICP fitness score is too bad: %f", fitness);
             return false;
@@ -2545,7 +2545,7 @@ class OnlineMeshMapper : public rclcpp::Node{
             io_mutex.unlock();
             return;
         }
-        double radius = 10.0;
+        double radius = 20.0;
         pcl::PointCloud<pcl::PointXYZ> input_cloud;
         pcl::PointCloud<pcl::PointXYZ> map_cloud = get_local_pointcloud(global_point, radius);
         octree->updateInnerOccupancy();
