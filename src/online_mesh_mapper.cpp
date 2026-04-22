@@ -369,7 +369,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         int64_t travel_y = org_y;
         int64_t travel_z = org_z;
         uint32_t counter = 1;
-        uint32_t threshold = 1;
+        uint32_t threshold = 2;
         if(splash_delete){
             threshold = 3;
         }
@@ -2361,7 +2361,21 @@ class OnlineMeshMapper : public rclcpp::Node{
         global_point.orientation.y = q_corrected.y();
         global_point.orientation.z = q_corrected.z();
         global_point.orientation.w = q_corrected.w();
-
+        int64_t robot_point_x = global_point.position.x * (float) scalar;
+        int64_t robot_point_y = global_point.position.y * (float) scalar;
+        int64_t robot_point_z = global_point.position.z * (float) scalar;
+        int64_t random_sample_interval = 100;
+        int64_t current_sample = 0;
+        for(const auto &p : corrected_cloud.points){
+            int64_t x_point = p.x;
+            int64_t y_point = p.y;
+            int64_t z_point = p.z;
+            current_sample++;
+            if(current_sample >= 99){
+                raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
+            }
+            current_sample = current_sample % random_sample_interval;
+        }
         for(const auto &p : corrected_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
@@ -2548,7 +2562,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         icp.setMaxCorrespondenceDistance((float) scalar * 1.0f);
         icp.setTransformationEpsilon(1e-4);//stop iterating when transform delta below
         icp.setEuclideanFitnessEpsilon(1e-3);//stop iterating when mean squared error below
-        icp.setMaximumIterations(50);
+        icp.setMaximumIterations(100);
         icp.setInputSource(source);
         icp.setInputTarget(target);
         /*
@@ -2570,7 +2584,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         }
 
         double fitness = icp.getFitnessScore((float)scalar * 1.0f);
-        double fitness_threshold = (double) scalar * 0.1;
+        double fitness_threshold = (double) scalar * 0.15;
         if(fitness > fitness_threshold){
             RCLCPP_ERROR(this->get_logger(), "ICP fitness score is too bad: %f", fitness);
             return false;
@@ -2587,8 +2601,8 @@ class OnlineMeshMapper : public rclcpp::Node{
         Eigen::AngleAxisf angle_axis(rot);
         float rotation_angle = std::abs(angle_axis.angle());
         
-        float max_translation = 1.0f * (float) scalar;
-        float max_rotation = 0.5; //radians
+        float max_translation = 0.33f * (float) scalar;
+        float max_rotation = 0.4; //radians
 
         if(translation > max_translation || rotation_angle > max_rotation){
             RCLCPP_ERROR(this->get_logger(), "ICP correction implausible, rejecting");
@@ -2674,6 +2688,15 @@ class OnlineMeshMapper : public rclcpp::Node{
         delete octree;
         pcl::transformPointCloud(raw_cloud, input_cloud, delta_transform);
         pcl::transformPointCloud(raw_del_cloud, input_del_cloud, delta_transform);
+        int64_t robot_point_x = global_point.position.x * (float) scalar;
+        int64_t robot_point_y = global_point.position.y * (float) scalar;
+        int64_t robot_point_z = global_point.position.z * (float) scalar;
+        for(const auto &p : input_cloud.points){
+            int64_t x_point = p.x;
+            int64_t y_point = p.y;
+            int64_t z_point = p.z;
+            raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
+        }
         for(auto &p : input_cloud.points){
             int64_t x_point = p.x * (float) scalar;
             int64_t y_point = p.y * (float) scalar;
@@ -2681,7 +2704,13 @@ class OnlineMeshMapper : public rclcpp::Node{
             p.x = x_point;
             p.y = y_point;
             p.z = z_point;
+            float x_dist = x_point - global_point.position.x * (float) scalar;
+            float y_dist = y_point - global_point.position.y * (float) scalar;
+            if(x_dist * x_dist + y_dist * y_dist > (1.0f * (float)scalar) * (1.0f * (float) scalar)){
+                voxel_graph_insert(graph, x_point, y_point, z_point);
+            }
         }
+        /*
         for(auto &p : input_del_cloud.points){
             int64_t x_point = p.x * (float) scalar;
             int64_t y_point = p.y * (float) scalar;
@@ -2689,25 +2718,28 @@ class OnlineMeshMapper : public rclcpp::Node{
             p.x = x_point;
             p.y = y_point;
             p.z = z_point;
+            voxel_graph_delete(graph, x_point, y_point, z_point);
         }
+        */
+        /*
         if(input_cloud.empty()){
             RCLCPP_ERROR(this->get_logger(), "input octomap empty!");
             io_mutex.unlock();
             return;
-        }/*
+        }
         for(const auto &p : input_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
-            voxel_graph_insert(graph, x_point, y_point, z_point);
+            //voxel_graph_insert(graph, x_point, y_point, z_point);
         }
         for(const auto &p : del_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
-            voxel_graph_delete(graph, x_point, y_point, z_point);
-        }
-        */
+            //voxel_graph_delete(graph, x_point, y_point, z_point);
+        } 
+        
         if(map_cloud.empty()){
             for (const auto &p : input_cloud.points) { 
                 voxel_graph_insert(graph, p.x, p.y, p.z);
@@ -2738,21 +2770,21 @@ class OnlineMeshMapper : public rclcpp::Node{
             int64_t z_point = p.z;
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
-        pcl::PointCloud<pcl::PointXYZ> corrected_del_cloud;
-        pcl::transformPointCloud(input_del_cloud, corrected_del_cloud, corrective_transform);
-        for(const auto &p : corrected_del_cloud.points){
+        
+        for(const auto &p : input_del_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
             voxel_graph_delete(graph, x_point, y_point, z_point);
         }
+        
         global_point.position.x += corrective_transform(0,3) / (float)scalar;
         global_point.position.y += corrective_transform(1,3) / (float)scalar;
         global_point.position.z += corrective_transform(2,3) / (float)scalar;
         Eigen::Matrix3f rotation = corrective_transform.block<3,3>(0,0);
         Eigen::Quaternionf q_correction(rotation);
         Eigen::Quaternionf q_current(
-               global_point.orientation.w,
+                global_point.orientation.w,
                 global_point.orientation.x,
                 global_point.orientation.y,
                 global_point.orientation.z);
@@ -2762,12 +2794,13 @@ class OnlineMeshMapper : public rclcpp::Node{
         global_point.orientation.z = q_corrected.z();
         global_point.orientation.w = q_corrected.w();
         
-
+        */
         const auto end = std::chrono::steady_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
         RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ns", diff.count());
         io_mutex.unlock();
     }
+    
 };
 
 int main(int argc, char ** argv)
