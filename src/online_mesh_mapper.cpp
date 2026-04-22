@@ -2608,30 +2608,88 @@ class OnlineMeshMapper : public rclcpp::Node{
         last_processed_octomap_msg = start;
         octomap::OcTree* octree = dynamic_cast<octomap::OcTree*>(octomap_msgs::binaryMsgToMap(*msg));
         if (!octree) {
-            RCLCPP_WARN(get_logger(), "Failed to convert Octomap message to tree");
+            RCLCPP_WARN(this->get_logger(), "Failed to convert Octomap message to tree");
             io_mutex.unlock();
             return;
         }
         double radius = 20.0;
+        pcl::PointCloud<pcl::PointXYZ> raw_cloud;
+        pcl::PointCloud<pcl::PointXYZ> raw_del_cloud;
         pcl::PointCloud<pcl::PointXYZ> input_cloud;
+        pcl::PointCloud<pcl::PointXYZ> input_del_cloud;
         pcl::PointCloud<pcl::PointXYZ> del_cloud;
         pcl::PointCloud<pcl::PointXYZ> map_cloud = get_local_pointcloud(global_point, radius);
         octree->updateInnerOccupancy();
+    
+        Eigen::Affine3f x_to_base = Eigen::Affine3f::Identity();
+        try{
+            auto tf = tf_buffer_->lookupTransform(
+                    msg->header.frame_id, "base_link",
+                    msg->header.stamp,
+                    rclcpp::Duration::from_seconds(0.1));
+            Eigen::Vector3f to_base_translation(
+                    tf.transform.translation.x,
+                    tf.transform.translation.y,
+                    tf.transform.translation.z);
+            Eigen::Quaternionf to_base_rotation(
+                    tf.transform.rotation.w,
+                    tf.transform.rotation.x,
+                    tf.transform.rotation.y,
+                    tf.transform.rotation.z);
+            x_to_base.translate(to_base_translation);
+            x_to_base.rotate(to_base_rotation);
+        }catch(const tf2::TransformException& ex){ 
+            RCLCPP_ERROR(this->get_logger(), "Tf lookup failed %s", ex.what());
+            delete octree;
+            io_mutex.unlock();
+            return;
+        }
+        Eigen::Quaternionf q_global(
+                global_point.orientation.w,
+                global_point.orientation.x,
+                global_point.orientation.y,
+                global_point.orientation.z);
+        Eigen::Vector3f t_global(
+                global_point.position.x,
+                global_point.position.y,
+                global_point.position.z);
+        Eigen::Affine3f base_to_global = Eigen::Affine3f::Identity();
+        base_to_global.translate(t_global);
+        base_to_global.rotate(q_global);
+        Eigen::Affine3f delta_transform = base_to_global * x_to_base.inverse();
         for(auto it = octree->begin_leafs(); it != octree->end_leafs(); ++it){
             if(octree->isNodeOccupied(*it)){
-                int64_t x = it.getX() * (float)scalar;
-                int64_t y = it.getY() * (float)scalar;
-                int64_t z = it.getZ() * (float)scalar;
-                input_cloud.push_back(pcl::PointXYZ(x, y, z));
+                float x = it.getX();
+                float y = it.getY();
+                float z = it.getZ();
+                raw_cloud.push_back(pcl::PointXYZ(x, y, z));
             }
             else{
-                int64_t x = it.getX() * (float)scalar;
-                int64_t y = it.getY() * (float)scalar;
-                int64_t z = it.getZ() * (float)scalar;
-                del_cloud.push_back(pcl::PointXYZ(x, y, z));
+                float x = it.getX();
+                float y = it.getY();
+                float z = it.getZ();
+                raw_del_cloud.push_back(pcl::PointXYZ(x, y, z));
             }
         }
         delete octree;
+        pcl::transformPointCloud(raw_cloud, input_cloud, delta_transform);
+        pcl::transformPointCloud(raw_del_cloud, input_del_cloud, delta_transform);
+        for(auto &p : input_cloud.points){
+            int64_t x_point = p.x * (float) scalar;
+            int64_t y_point = p.y * (float) scalar;
+            int64_t z_point = p.z * (float) scalar;
+            p.x = x_point;
+            p.y = y_point;
+            p.z = z_point;
+        }
+        for(auto &p : input_del_cloud.points){
+            int64_t x_point = p.x * (float) scalar;
+            int64_t y_point = p.y * (float) scalar;
+            int64_t z_point = p.z * (float) scalar;
+            p.x = x_point;
+            p.y = y_point;
+            p.z = z_point;
+        }
         if(input_cloud.empty()){
             RCLCPP_ERROR(this->get_logger(), "input octomap empty!");
             io_mutex.unlock();
@@ -2655,8 +2713,8 @@ class OnlineMeshMapper : public rclcpp::Node{
                 voxel_graph_insert(graph, p.x, p.y, p.z);
             }
             const auto end = std::chrono::steady_clock::now();
-            auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-            RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ns", diff.count());
+            auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ms", diff.count());
             io_mutex.unlock();
             return;
         }
@@ -2680,7 +2738,14 @@ class OnlineMeshMapper : public rclcpp::Node{
             int64_t z_point = p.z;
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
-        
+        pcl::PointCloud<pcl::PointXYZ> corrected_del_cloud;
+        pcl::transformPointCloud(input_del_cloud, corrected_del_cloud, corrective_transform);
+        for(const auto &p : corrected_del_cloud.points){
+            int64_t x_point = p.x;
+            int64_t y_point = p.y;
+            int64_t z_point = p.z;
+            voxel_graph_delete(graph, x_point, y_point, z_point);
+        }
         global_point.position.x += corrective_transform(0,3) / (float)scalar;
         global_point.position.y += corrective_transform(1,3) / (float)scalar;
         global_point.position.z += corrective_transform(2,3) / (float)scalar;
