@@ -356,6 +356,81 @@ class OnlineMeshMapper : public rclcpp::Node{
     }
     void raycast_delete(int64_t org_x, int64_t org_y,
             int64_t org_z, int64_t dest_x, int64_t dest_y, int64_t dest_z, bool splash_delete){
+        // Validate input
+        int64_t initial_dist = get_manhattan_dist(org_x, org_y, org_z, dest_x, dest_y, dest_z);
+        if (initial_dist <= 2) {
+            return;
+        }
+    
+        // Calculate direction vector
+        int64_t dx = dest_x - org_x;
+        int64_t dy = dest_y - org_y;
+        int64_t dz = dest_z - org_z;
+    
+        // Use the largest component to determine steps
+        // This ensures we visit every voxel the ray passes through
+        int64_t steps = std::max({std::abs(dx), std::abs(dy), std::abs(dz)});
+    
+        if (steps == 0) {
+            return;
+        }
+    
+        // Normalize to step size
+        double step_x = static_cast<double>(dx) / steps;
+        double step_y = static_cast<double>(dy) / steps;
+        double step_z = static_cast<double>(dz) / steps;
+    
+        int64_t threshold = splash_delete ? 3 : 4;
+        int64_t safety_limit = steps + 20;  // Hard limit to prevent infinite loops
+    
+        double pos_x = org_x;
+        double pos_y = org_y;
+        double pos_z = org_z;
+    
+        int64_t last_voxel_x = std::lround(pos_x);
+        int64_t last_voxel_y = std::lround(pos_y);
+        int64_t last_voxel_z = std::lround(pos_z);
+    
+        for (int64_t iteration = 0; iteration < safety_limit; iteration++) {
+            // Step along the ray
+            pos_x += step_x;
+            pos_y += step_y;
+            pos_z += step_z;
+        
+        // Round to current voxel
+            int64_t voxel_x = std::lround(pos_x);
+            int64_t voxel_y = std::lround(pos_y);
+            int64_t voxel_z = std::lround(pos_z);
+        
+        // Skip if we haven't moved to a new voxel (avoids duplicate deletions)
+            if (voxel_x == last_voxel_x && voxel_y == last_voxel_y && voxel_z == last_voxel_z) {
+                continue;
+            }
+        
+            last_voxel_x = voxel_x;
+            last_voxel_y = voxel_y;
+            last_voxel_z = voxel_z;
+        
+        // Check if we're close enough to destination
+            int64_t dist = get_manhattan_dist(voxel_x, voxel_y, voxel_z, dest_x, dest_y, dest_z);
+            if (dist <= threshold) {
+                break;  // Success - reached destination
+            }   
+        
+            // Delete the voxel
+            bool point_deleted = voxel_graph_delete(graph, voxel_x, voxel_y, voxel_z);
+        
+            // Apply splash radius if enabled
+            if (point_deleted && splash_delete) {
+                //delete_splash_radius(voxel_x, voxel_y, voxel_z);
+            }
+        }
+    }
+        /*
+        int64_t initial_dist = get_manhattan_dist(org_x, org_y, org_z, dest_x, dest_y, dest_z);
+        if(initial_dist <= 2){
+            return;
+        }
         DoubleVector_t diff_vect;
         diff_vect.x = dest_x - org_x;
         diff_vect.y = dest_y - org_y;
@@ -365,16 +440,24 @@ class OnlineMeshMapper : public rclcpp::Node{
         //RCLCPP_WARN(this->get_logger(), "diff_vect is %f %f %f \n", diff_vect.x, diff_vect.y, diff_vect.z);
         DoubleVector_t normal = double_vect_normalize(diff_vect);
         //RCLCPP_WARN(this->get_logger(), "normal_vect is %f %f %f \n", normal.x, normal.y, normal.z);
-        int64_t travel_x = org_x;
-        int64_t travel_y = org_y;
-        int64_t travel_z = org_z;
+        double travel_x = org_x;
+        double travel_y = org_y;
+        double travel_z = org_z;
         uint32_t counter = 1;
-        uint32_t threshold = 2;
+        uint32_t threshold = 4;
         if(splash_delete){
             threshold = 3;
         }
+        int64_t max_iterations = initial_dist + 10;
+
         while(get_manhattan_dist(travel_x, travel_y, travel_z, dest_x, dest_y, dest_z) > threshold){
             bool point_deleted = voxel_graph_delete(graph, travel_x, travel_y, travel_z);
+            //RCLCPP_WARN(this->get_logger(), "at iteration %d out of %d", counter, max_iterations);
+            if(counter > max_iterations){
+
+                RCLCPP_ERROR(this->get_logger(), "raycast failed");
+                return;
+            }
             if(point_deleted && splash_delete){
                 
                 voxel_graph_delete(graph, travel_x + 1, travel_y, travel_z);
@@ -402,14 +485,15 @@ class OnlineMeshMapper : public rclcpp::Node{
                 
             }
             //RCLCPP_WARN(this->get_logger(), "old_ray_vect is %ld %ld %ld \n", travel_x, travel_y, travel_z);
-            counter += 1;
-            travel_x = std::lround(org_x + (normal.x * counter));
-            travel_y = std::lround(org_y + (normal.y * counter));
-            travel_z = std::lround(org_z + (normal.z * counter));
+            counter += 2;
+            travel_x = (double) org_x + (normal.x * (double) counter);
+            travel_y = (double) org_y + (normal.y * (double) counter);
+            travel_z = (double) org_z + (normal.z * (double) counter);
             //RCLCPP_WARN(this->get_logger(), "new_ray_vect is %ld %ld %ld \n", travel_x, travel_y, travel_z);
         }
         //voxel_graph_delete(graph, dest_x, dest_y, dest_z);
     }
+        */
     
     int64_t get_manhattan_dist(int64_t org_x, int64_t org_y, int64_t org_z,
              int64_t dest_x, int64_t dest_y, int64_t dest_z)
@@ -2364,18 +2448,22 @@ class OnlineMeshMapper : public rclcpp::Node{
         int64_t robot_point_x = global_point.position.x * (float) scalar;
         int64_t robot_point_y = global_point.position.y * (float) scalar;
         int64_t robot_point_z = global_point.position.z * (float) scalar;
-        int64_t random_sample_interval = 100;
+        int64_t random_sample_interval = 1000;
         int64_t current_sample = 0;
+        /*
         for(const auto &p : corrected_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
             current_sample++;
-            if(current_sample >= 99){
+            if(current_sample >= 1000){
+                //RCLCPP_INFO(this->get_logger(), "raycast debug!");
                 raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
+                //RCLCPP_INFO(this->get_logger(), "raycast done!");
+                current_sample = 0;
             }
-            current_sample = current_sample % random_sample_interval;
         }
+        */
         for(const auto &p : corrected_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
@@ -2796,8 +2884,8 @@ class OnlineMeshMapper : public rclcpp::Node{
         
         */
         const auto end = std::chrono::steady_clock::now();
-        auto diff = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start);
-        RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ns", diff.count());
+        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ms", diff.count());
         io_mutex.unlock();
     }
     
