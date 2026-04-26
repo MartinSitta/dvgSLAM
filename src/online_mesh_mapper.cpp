@@ -2157,6 +2157,7 @@ class OnlineMeshMapper : public rclcpp::Node{
     int64_t prev_x = 0;
     int64_t prev_y = 0;
     int64_t prev_z = 0;
+    float dynamic_map_entry_cap = 0.1;
     std::chrono::steady_clock::time_point last_processed_octomap_msg;
     std::chrono::steady_clock::time_point last_processed_pointcloud_msg;
     void del_point_cloud_in_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
@@ -2228,16 +2229,14 @@ class OnlineMeshMapper : public rclcpp::Node{
     bool first_call_pc_in = true;
     void point_cloud_in_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {        
-        //this code assumes little endian and x, y, z formatting
 
         io_mutex.lock();
-        const auto start = std::chrono::steady_clock::now();
-        auto time_since_last_processed_pointcloud = std::chrono::duration_cast<std::chrono::milliseconds>(start - last_processed_pointcloud_msg);
-        if(time_since_last_processed_pointcloud < std::chrono::milliseconds{500}){
+        const auto pose_start = std::chrono::steady_clock::now();
+        auto time_since_last_processed_pointcloud = std::chrono::duration_cast<std::chrono::milliseconds>(pose_start - last_processed_pointcloud_msg);
+        if(time_since_last_processed_pointcloud < std::chrono::milliseconds{200}){
             io_mutex.unlock();
             return;
         }
-        last_processed_pointcloud_msg = start;
         sensor_msgs::msg::PointCloud2 transformed_cloud;
         try{
             auto tf = tf_buffer_->lookupTransform(
@@ -2255,9 +2254,10 @@ class OnlineMeshMapper : public rclcpp::Node{
         pcl::PointCloud<pcl::PointXYZ>::Ptr raw_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::PointCloud<pcl::PointXYZ>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZ>);
         pcl::fromROSMsg(transformed_cloud, *raw_cloud);
+        //pcl::fromROSMsg(*msg, *raw_cloud);
         pcl::RandomSample<pcl::PointXYZ> rs;
         rs.setInputCloud(raw_cloud);
-        rs.setSample(raw_cloud->size() * ((float)scalar * 0.02f));
+        rs.setSample(raw_cloud->size() * ((float)scalar * 0.002f));
         rs.filter(*downsampled_cloud);
         Eigen::Quaternionf q(
                 global_point.orientation.w,
@@ -2270,14 +2270,13 @@ class OnlineMeshMapper : public rclcpp::Node{
                 global_point.position.y,
                 global_point.position.z);
         Eigen::Affine3f transform = Eigen::Affine3f::Identity();
-        transform.translate(t);
-        transform.rotate(q);
+        transform = Eigen::Translation3f(t) * q;
         pcl::PointCloud<pcl::PointXYZ> input_cloud;
         pcl::transformPointCloud(*downsampled_cloud, input_cloud, transform);
         for(auto &p : input_cloud.points){
-            p.x = (int64_t) (p.x * (float)scalar);
-            p.y = (int64_t) (p.y * (float)scalar);
-            p.z = (int64_t) (p.z * (float)scalar); 
+            p.x = (int64_t)(p.x * (float)scalar);
+            p.y = (int64_t)(p.y * (float)scalar);
+            p.z = (int64_t)(p.z * (float)scalar); 
         }
         //TODO: I HAVE TO TRANSFORM THIS POINTCLOUD FROM THE FRAME ID OF THE MSG
         //TO GLOBAL POSE THEN I HAVE TO DO ICP
@@ -2306,7 +2305,8 @@ class OnlineMeshMapper : public rclcpp::Node{
             */
         pcl::PointCloud<pcl::PointXYZ> corrected_cloud;
         Eigen::Matrix4f corrective_transform;
-        bool converged = run_icp(input_cloud, map_cloud, &corrected_cloud, &corrective_transform);
+        float fitness = 1000.0f;
+        bool converged = run_icp(input_cloud, map_cloud, &corrected_cloud, &corrective_transform, &fitness);
         if(!converged){
             RCLCPP_ERROR(this->get_logger(), "pose correction failed!");
             /*
@@ -2351,17 +2351,31 @@ class OnlineMeshMapper : public rclcpp::Node{
         int64_t robot_point_z = global_point.position.z * (float) scalar;
         int64_t random_sample_interval = 1000;
         int64_t current_sample = 0;
-        
+        const auto pose_end = std::chrono::steady_clock::now();
+        auto pose_diff = std::chrono::duration_cast<std::chrono::milliseconds>(pose_end - pose_start);
+        RCLCPP_INFO(this->get_logger(), "pose correction took %d ms", pose_diff.count());
+        last_processed_pointcloud_msg = pose_end;
+        float correction_magnitude = corrective_transform.block<3,1>(0,3).norm();
+        RCLCPP_INFO(this->get_logger(), "fitness value is %f", fitness);
+        if(fitness > dynamic_map_entry_cap && correction_magnitude > 1.0f * (float)scalar){
+            RCLCPP_INFO(this->get_logger(), "Map entry not done due to poor fitness");
+            dynamic_map_entry_cap = dynamic_map_entry_cap * 1.05;
+            io_mutex.unlock();
+            return;
+        }
+        dynamic_map_entry_cap = dynamic_map_entry_cap * 0.8;
+        const auto pc_start = std::chrono::steady_clock::now();
         for(const auto &p : corrected_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
             current_sample++;
-            /*
+            
             if(z_point > global_point.position.z * (float) scalar){
                 raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
             }
-            */
+            
+            /*
             if(current_sample >= scalar){
                 //RCLCPP_INFO(this->get_logger(), "raycast debug!");
                 if(z_point > global_point.position.z * (float) scalar){
@@ -2372,6 +2386,8 @@ class OnlineMeshMapper : public rclcpp::Node{
                 //RCLCPP_INFO(this->get_logger(), "raycast done!");
                 current_sample = 0;
             }
+            */
+            
             
         }
         for(const auto &p : corrected_cloud.points){
@@ -2381,9 +2397,8 @@ class OnlineMeshMapper : public rclcpp::Node{
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
 
-        const auto end = std::chrono::steady_clock::now();
-        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
+        const auto pc_end = std::chrono::steady_clock::now();
+        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(pc_end - pc_start);
         RCLCPP_INFO(this->get_logger(), "entering the pointcloud took %d ms", diff.count());
 
         io_mutex.unlock();
@@ -2439,6 +2454,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         */
     }
     void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg){                                                                           
+        //return;
         io_mutex.lock();
         prev_odom_msg_pose = current_odom_msg_pose;
         current_odom_msg_pose.position = msg->pose.pose.position;
@@ -2552,15 +2568,16 @@ class OnlineMeshMapper : public rclcpp::Node{
     bool run_icp(pcl::PointCloud<pcl::PointXYZ>& input_cloud,
             pcl::PointCloud<pcl::PointXYZ>& map_cloud,
             pcl::PointCloud<pcl::PointXYZ>* corrected_cloud_out,
-            Eigen::Matrix4f* transform_out){
+            Eigen::Matrix4f* transform_out,
+            float *fitness_out){
         pcl::PointCloud<pcl::PointXYZ>::Ptr source(new pcl::PointCloud<pcl::PointXYZ>(input_cloud));
         pcl::PointCloud<pcl::PointXYZ>::Ptr target(new pcl::PointCloud<pcl::PointXYZ>(map_cloud));
         
         pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
         icp.setMaxCorrespondenceDistance((float) scalar * 1.0f);
-        icp.setTransformationEpsilon(1e-7);//stop iterating when transform delta below
-        icp.setEuclideanFitnessEpsilon(1e-6);//stop iterating when mean squared error below
-        icp.setMaximumIterations(30);
+        icp.setTransformationEpsilon(1e-4);//stop iterating when transform delta below
+        icp.setEuclideanFitnessEpsilon(1e-3);//stop iterating when mean squared error below
+        icp.setMaximumIterations(10000);
         icp.setInputSource(source);
         icp.setInputTarget(target);
         /*
@@ -2582,7 +2599,8 @@ class OnlineMeshMapper : public rclcpp::Node{
         }
 
         double fitness = icp.getFitnessScore((float)scalar * 1.0f);
-        double fitness_threshold = (double) scalar * 0.15;
+        double fitness_threshold = (double) scalar * 0.2;
+        *fitness_out = fitness;
         if(fitness > fitness_threshold){
             RCLCPP_ERROR(this->get_logger(), "ICP fitness score is too bad: %f", fitness);
             return false;
@@ -2592,21 +2610,21 @@ class OnlineMeshMapper : public rclcpp::Node{
         
         float tx = (*transform_out)(0,3);
         float ty = (*transform_out)(1,3);
-        float tz = (*transform_out)(2,3);
+        float tz = (*transform_out)(2,3) * 4;
         float translation = std::sqrt(tx * tx + ty * ty + tz * tz);
         
         Eigen::Matrix3f rot = (*transform_out).block<3,3>(0,0);
         Eigen::AngleAxisf angle_axis(rot);
         float rotation_angle = std::abs(angle_axis.angle());
-        
-        float max_translation = 0.1f * (float) scalar;
-        float max_rotation = 0.3; //radians
+        /*
+        float max_translation = 1.0f * (float) scalar;
+        float max_rotation = 0.4; //radians
 
         if(translation > max_translation || rotation_angle > max_rotation){
             RCLCPP_ERROR(this->get_logger(), "ICP correction implausible, rejecting");
             return false;
         }
-        
+        */        
         return true;
     }
     void octomap_bin_callback(const octomap_msgs::msg::Octomap::SharedPtr msg){
