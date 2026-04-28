@@ -105,9 +105,7 @@ class OnlineMeshMapper : public rclcpp::Node{
   public:
     OnlineMeshMapper()
     : Node("online_mesh_mapper"), count_(0),
-      clock_(std::make_shared<rclcpp::Clock>(RCL_ROS_TIME)),
-      tf_buffer_(std::make_shared<tf2_ros::Buffer>(clock_)),
-      tf_listener_(std::make_shared<tf2_ros::TransformListener>(*tf_buffer_)){   
+      clock_(std::make_shared<rclcpp::Clock>(RCL_ROS_TIME)){   
         this->declare_parameter<std::string>("in_topic", "");
         this->declare_parameter<std::string>("in_del_topic", "");
         this->declare_parameter<std::string>("frame_id", "");
@@ -195,6 +193,8 @@ class OnlineMeshMapper : public rclcpp::Node{
                     std::bind(&OnlineMeshMapper::octomap_bin_callback,
                     this, _1));
         }
+        tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+        tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         publisher_two = this->create_publisher<nav_msgs::msg::Odometry>("debug_map_pose", 1);
         timer_two = this->create_wall_timer(
         10ms, std::bind(&OnlineMeshMapper::debug_map_pose_callback, this));
@@ -359,16 +359,16 @@ class OnlineMeshMapper : public rclcpp::Node{
     void raycast_delete(int64_t org_x, int64_t org_y, int64_t org_z,
                     int64_t dest_x, int64_t dest_y, int64_t dest_z, bool splash_delete){
         if(org_x == dest_x && org_y == dest_y && org_z == dest_z) return;
-        int64_t max_deletions = (float) scalar * 0.3f;
         int64_t current_del_count = 0;
         DoubleVector_t diff_vect{(double)(dest_x-org_x), (double)(dest_y-org_y), (double)(dest_z-org_z)};
         double len2 = diff_vect.x*diff_vect.x + diff_vect.y*diff_vect.y + diff_vect.z*diff_vect.z;
+        int64_t max_deletions = std::sqrt(len2) / 4;
         if(len2 < 1.0) return;
 
         DoubleVector_t normal = double_vect_normalize(diff_vect);
         int64_t travel_x = org_x, travel_y = org_y, travel_z = org_z;
         uint32_t counter = 1;
-        uint32_t threshold = splash_delete ? 3 : 2;
+        uint32_t threshold = 0.2f * scalar;
 
         uint32_t max_iter = (uint32_t)std::ceil(std::sqrt(len2)) + 16;
 
@@ -381,8 +381,21 @@ class OnlineMeshMapper : public rclcpp::Node{
             return;
         }
         if(point_detected){
-            voxel_graph_delete(graph, travel_x, travel_y, travel_z);
+            if(splash_delete){
+                int64_t splash_radius = scalar * 0.5;
+                for(int64_t splash_x = travel_x - (splash_radius / 2);splash_x <= travel_x + (splash_radius / 2); splash_x++){
+                    for(int64_t splash_y = travel_y - (splash_radius / 2);splash_y <= travel_y + (splash_radius / 2); splash_y++){
+                        for(int64_t splash_z = travel_z - (splash_radius / 2);splash_z <= travel_z + (splash_radius / 2); splash_z++){
+                            voxel_graph_delete(graph, splash_x, splash_y, splash_z);
+                        }
+                    }
+                }
+            current_del_count = current_del_count + splash_radius + splash_radius + splash_radius;
+            }
+            else{
             current_del_count++;
+                voxel_graph_delete(graph, travel_x, travel_y, travel_z);
+            }
         }
         counter++;
         travel_x = std::lround(org_x + normal.x * counter);
@@ -2241,7 +2254,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         io_mutex.lock();
         const auto pose_start = std::chrono::steady_clock::now();
         auto time_since_last_processed_pointcloud = std::chrono::duration_cast<std::chrono::milliseconds>(pose_start - last_processed_pointcloud_msg);
-        if(time_since_last_processed_pointcloud < std::chrono::milliseconds{200}){
+        if(time_since_last_processed_pointcloud < std::chrono::milliseconds{50}){
             io_mutex.unlock();
             return;
         }
@@ -2272,7 +2285,8 @@ class OnlineMeshMapper : public rclcpp::Node{
         //pcl::fromROSMsg(*msg, *raw_cloud);
         pcl::RandomSample<pcl::PointXYZ> rs;
         rs.setInputCloud(raw_cloud);
-        rs.setSample(raw_cloud->size() * 0.05f);
+        //rs.setSample(raw_cloud->size() * 0.05f);
+        rs.setSample(scalar * 150);
         rs.filter(*downsampled_cloud);
         Eigen::Quaternionf q(
                 global_point.orientation.w,
@@ -2393,28 +2407,29 @@ class OnlineMeshMapper : public rclcpp::Node{
         }
         dynamic_map_entry_cap = dynamic_map_entry_cap * 0.7;
         const auto pc_start = std::chrono::steady_clock::now();
+        int64_t sample_ratio = 20;
         for(const auto &p : corrected_cloud.points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
             current_sample++;
-            
-            if(z_point > global_point.position.z * (float) scalar){
-                raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
-            }
-            
             /*
-            if(current_sample >= scalar){
+            if(z_point > (int64_t)(global_point.position.z * (float) scalar)){
+                raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
+            }
+            */
+            
+            if(current_sample >= sample_ratio){
                 //RCLCPP_INFO(this->get_logger(), "raycast debug!");
                 if(z_point > global_point.position.z * (float) scalar){
-                    raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
+                    raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
                 }
 
                 //
                 //RCLCPP_INFO(this->get_logger(), "raycast done!");
                 current_sample = 0;
             }
-            */
+            
             
             
         }
@@ -2679,7 +2694,6 @@ class OnlineMeshMapper : public rclcpp::Node{
         pcl::PointCloud<pcl::PointXYZ> input_del_cloud;
         pcl::PointCloud<pcl::PointXYZ> del_cloud;
         pcl::PointCloud<pcl::PointXYZ> map_cloud = get_local_pointcloud(global_point, radius);
-        octree->updateInnerOccupancy();
     
         Eigen::Affine3f x_to_base = Eigen::Affine3f::Identity();
         try{
@@ -2724,25 +2738,18 @@ class OnlineMeshMapper : public rclcpp::Node{
                 float z = it.getZ();
                 raw_cloud.push_back(pcl::PointXYZ(x, y, z));
             }
+            /*
             else{
                 float x = it.getX();
                 float y = it.getY();
                 float z = it.getZ();
                 raw_del_cloud.push_back(pcl::PointXYZ(x, y, z));
             }
+            */
         }
         delete octree;
         pcl::transformPointCloud(raw_cloud, input_cloud, delta_transform);
         pcl::transformPointCloud(raw_del_cloud, input_del_cloud, delta_transform);
-        int64_t robot_point_x = global_point.position.x * (float) scalar;
-        int64_t robot_point_y = global_point.position.y * (float) scalar;
-        int64_t robot_point_z = global_point.position.z * (float) scalar;
-        for(const auto &p : input_cloud.points){
-            int64_t x_point = p.x * (float) scalar;
-            int64_t y_point = p.y * (float) scalar;
-            int64_t z_point = p.z * (float) scalar;
-            raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, false);
-        }
         for(auto &p : input_cloud.points){
             int64_t x_point = p.x * (float) scalar;
             int64_t y_point = p.y * (float) scalar;
