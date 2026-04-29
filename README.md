@@ -1,14 +1,14 @@
-online\_mesh\_mapper
+Dynamic voxelgrid SLAM (dvgSLAM)
 ====================
 
-The online mesh mapper is a mapping utility, which generates a mesh map
-in real time using a pointcloud2. The ros node publishes a mesh of the
+The dvgSLAM is a 3D mapping utility, which generates a mesh map
+in real time using a pointcloud2. The ros2 node publishes a mesh of the
 type mesh\_msgs/msg/MeshGeometryStamped
 (<https://github.com/naturerobots/mesh_tools/blob/main/mesh_msgs/msg/MeshGeometryStamped.msg>).
 A wavefront file also gets created when terminating the node.
 
-This mapping utility uses a greedy meshing algorithm by default. it can
-be changed by changing the source code and recompiling the package,
+This mapping utility uses ICP algorithm with raycast removal of dynamic objects with a 2-bit log odd occupancy mapping with a dynamic 3D grid map.
+A mesh visualizer is provided with the package.
 however changes should only be made when only one thread is availibile
 
 Parameters for usage
@@ -60,11 +60,8 @@ To start the node run the command:
 Known issues
 ------------
 
-Setting the max\_chunks too high in my case 2\^15 and higher causes ros2
-to kill the program. I havent yet found a solution for this. All I know
-about this is that this doesnt happen when running the mapping model
-outside of ros2.
-
+Setting the max\_chunks too high and higher causes ros2
+to kill the program. I havent yet found a solution for this. so keep the hash table size at something reasonable (recommend is a 100-200 MB hashtable 2^24
 To avoid this issue I recommend keeping the max\_chunks parameter at a
 lower amount. Alternatively you can start 2\^32 and work your way down
 until it stops crashing.
