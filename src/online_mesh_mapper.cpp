@@ -240,63 +240,94 @@ class OnlineMeshMapper : public rclcpp::Node{
             out_msg.header.frame_id = "odom";
             publisher_two->publish(out_msg);
         }
+    
+    DoubleVector_t build_voxel_local_normal(DoubleVector_t ray_vect_normalized, int64_t voxel_x, int64_t voxel_y, int64_t voxel_z, int64_t radius){
+        DoubleVector_t cumulative_vect{0,0,0};
+        int64_t voxel_count = 0;
+        for(int64_t x_offset = -radius; x_offset <= radius; x_offset++){
+            for(int64_t y_offset = -radius; y_offset <= radius; y_offset++){
+                for(int64_t z_offset = -radius; z_offset <= radius; z_offset++){
+                    if(x_offset * x_offset + y_offset * y_offset + z_offset * z_offset < radius * radius){
+                        if(voxel_graph_lookup(graph, voxel_x + x_offset, voxel_y + y_offset, voxel_z + z_offset) >= 2){
+                            cumulative_vect.x += x_offset;
+                            cumulative_vect.y += y_offset;
+                            cumulative_vect.z += z_offset;
+                            voxel_count++;
+                        }
+                    }
+                }
+            }
+        }
+        double vector_len2 = cumulative_vect.x * cumulative_vect.x + cumulative_vect.y * cumulative_vect.y + cumulative_vect.z * cumulative_vect.z;
+        if(voxel_count < 2 || vector_len2 < 1.0){
+            return DoubleVector_t{-ray_vect_normalized.x, -ray_vect_normalized.y, -ray_vect_normalized.z};
+        }
+        DoubleVector_t cumulative_vect_norm = double_vect_normalize(cumulative_vect);
+        DoubleVector_t normal = {-cumulative_vect_norm.x, -cumulative_vect_norm.y, -cumulative_vect_norm.z};
+        return normal;
+    }
     void raycast_delete(int64_t org_x, int64_t org_y, int64_t org_z,
                     int64_t dest_x, int64_t dest_y, int64_t dest_z, bool splash_delete){
         if(org_x == dest_x && org_y == dest_y && org_z == dest_z) return;
         int64_t current_del_count = 0;
         DoubleVector_t diff_vect{(double)(dest_x-org_x), (double)(dest_y-org_y), (double)(dest_z-org_z)};
         double len2 = diff_vect.x*diff_vect.x + diff_vect.y*diff_vect.y + diff_vect.z*diff_vect.z;
-        int64_t max_deletions = std::sqrt(len2) / 10;
+        int64_t max_deletions = (float) scalar * 0.1;
         if(len2 < 1.0) return;
 
         DoubleVector_t normal = double_vect_normalize(diff_vect);
         int64_t travel_x = org_x, travel_y = org_y, travel_z = org_z;
         uint32_t counter = 1;
-        uint32_t threshold = 0.2f * scalar;
-        int64_t splash_diameter = scalar * 0.15f;
+        uint32_t threshold = 0.4f * (float)scalar;
+        int64_t splash_diameter = (float)scalar * 0.15f;
         if(splash_delete){
-            threshold = splash_diameter + 0.1f * (float) scalar;
+            threshold = 2 * splash_diameter + threshold;
         }
         uint32_t max_iter = (uint32_t)std::ceil(std::sqrt(len2)) + 16;
-
         while(counter < max_iter &&
-            get_manhattan_dist(travel_x, travel_y, travel_z, dest_x, dest_y, dest_z) > threshold){
+            get_euclidean_dist(travel_x, travel_y, travel_z, dest_x, dest_y, dest_z) > threshold){
 
-        bool point_detected = voxel_graph_lookup(graph, travel_x, travel_y, travel_z);
-        if(current_del_count >=  max_deletions)
-        {
-            return;
-        }
-        if(point_detected){
-            if(splash_delete){
-                for(int64_t splash_x = travel_x - (splash_diameter / 2);splash_x <= travel_x + (splash_diameter / 2); splash_x++){
-                    for(int64_t splash_y = travel_y - (splash_diameter / 2);splash_y <= travel_y + (splash_diameter / 2); splash_y++){
-                        for(int64_t splash_z = travel_z - (splash_diameter / 2);splash_z <= travel_z + (splash_diameter / 2); splash_z++){
-                            voxel_graph_delete(graph, splash_x, splash_y, splash_z);
+            bool point_detected = voxel_graph_lookup(graph, travel_x, travel_y, travel_z);
+            if(current_del_count >=  max_deletions){
+                return;
+            }
+            if(point_detected){
+                DoubleVector_t voxel_normal = build_voxel_local_normal(normal, travel_x, travel_y, travel_z, 6);
+                double angle = voxel_normal.x * normal.x + voxel_normal.y * normal.y + voxel_normal.z * normal.z;
+                if(angle <= -0.1){
+                    if(splash_delete){
+                        for(int64_t splash_x = travel_x - (splash_diameter / 2);splash_x <= travel_x + (splash_diameter / 2); splash_x++){
+                            for(int64_t splash_y = travel_y - (splash_diameter / 2);splash_y <= travel_y + (splash_diameter / 2); splash_y++){
+                                for(int64_t splash_z = travel_z - (splash_diameter / 2);splash_z <= travel_z + (splash_diameter / 2); splash_z++){
+                                    voxel_graph_delete(graph, splash_x, splash_y, splash_z);
+                                }
+                            }
                         }
+                        return;
+                    }
+                    else{
+                        current_del_count++;
+                        voxel_graph_delete(graph, travel_x, travel_y, travel_z);
                     }
                 }
-            current_del_count = current_del_count + splash_diameter + splash_diameter + splash_diameter;
             }
-            else{
-                current_del_count++;
-                voxel_graph_delete(graph, travel_x, travel_y, travel_z);
-            }
-        }
-        if(splash_delete){
-            counter += splash_diameter;
-        }
-        counter++;
-        travel_x = std::lround(org_x + normal.x * counter);
-        travel_y = std::lround(org_y + normal.y * counter);
-        travel_z = std::lround(org_z + normal.z * counter);
+            counter++;
+            travel_x = std::lround(org_x + normal.x * counter);
+            travel_y = std::lround(org_y + normal.y * counter);
+            travel_z = std::lround(org_z + normal.z * counter);
         }
     }
 
     int64_t get_manhattan_dist(int64_t org_x, int64_t org_y, int64_t org_z,
-             int64_t dest_x, int64_t dest_y, int64_t dest_z)
-    {
+             int64_t dest_x, int64_t dest_y, int64_t dest_z){
         return labs(org_x - dest_x) + labs(org_y - dest_y) + labs(org_z - dest_z);
+    }
+    int64_t get_euclidean_dist(int64_t org_x, int64_t org_y, int64_t org_z,
+             int64_t dest_x, int64_t dest_y, int64_t dest_z){
+        float x_dist = org_x - dest_x;
+        float y_dist = org_y - dest_y;
+        float z_dist = org_z - dest_z;
+        return std::sqrt(x_dist * x_dist + y_dist * y_dist + z_dist * z_dist);
     }
     DoubleVector_t double_vect_normalize(DoubleVector_t in){       
         DoubleVector_t out;
@@ -875,62 +906,62 @@ class OnlineMeshMapper : public rclcpp::Node{
                     bool right_neighbor = true;
                     bool foward_neighbor = true;
                     bool back_neighbor = true;
-                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 3){
+                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 2){
                         continue;
                     }
                     //up
                     if(moving_z == ALT_CHUNK_LEN - 1){
                         if(upper_neighbor_chunk != NULL){
-                            up_neighbor = alt_chunk_lookup(upper_neighbor_chunk, total_x, total_y, total_z + 1) == 3;
+                            up_neighbor = alt_chunk_lookup(upper_neighbor_chunk, total_x, total_y, total_z + 1) >= 2;
                         }
                     }
                     else{
-                        up_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z + 1) == 3;
+                        up_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z + 1) >= 2;
                     }
                     //down
                     if(moving_z == 0){
                         if(lower_neighbor_chunk != NULL){
-                            down_neighbor = alt_chunk_lookup(lower_neighbor_chunk, total_x, total_y, total_z - 1) == 3;
+                            down_neighbor = alt_chunk_lookup(lower_neighbor_chunk, total_x, total_y, total_z - 1) >= 2;
                         }
                     }
                     else{
-                        down_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z - 1) == 3;
+                        down_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z - 1) >= 2;
                     }
                     //left
                     if(moving_y == ALT_CHUNK_LEN - 1){
                         if(left_neighbor_chunk != NULL){
-                            left_neighbor = alt_chunk_lookup(left_neighbor_chunk, total_x, total_y + 1, total_z) == 3;
+                            left_neighbor = alt_chunk_lookup(left_neighbor_chunk, total_x, total_y + 1, total_z) >= 2;
                         }
                     }
                     else{
-                        left_neighbor = alt_chunk_lookup(chunk, total_x, total_y + 1, total_z) == 3;
+                        left_neighbor = alt_chunk_lookup(chunk, total_x, total_y + 1, total_z) >= 2;
                     }
                     //right
                     if(moving_y == 0){
                         if(right_neighbor_chunk != NULL){
-                            right_neighbor = alt_chunk_lookup(right_neighbor_chunk, total_x, total_y - 1, total_z) == 3;
+                            right_neighbor = alt_chunk_lookup(right_neighbor_chunk, total_x, total_y - 1, total_z) >= 2;
                         }
                     }
                     else{
-                        right_neighbor = alt_chunk_lookup(chunk, total_x, total_y - 1, total_z) == 3;
+                        right_neighbor = alt_chunk_lookup(chunk, total_x, total_y - 1, total_z) >= 2;
                     }
                     //foward
                     if(moving_x == ALT_CHUNK_LEN - 1){
                         if(foward_neighbor_chunk != NULL){
-                            foward_neighbor = alt_chunk_lookup(foward_neighbor_chunk, total_x + 1, total_y, total_z) == 3;
+                            foward_neighbor = alt_chunk_lookup(foward_neighbor_chunk, total_x + 1, total_y, total_z) >= 2;
                         }
                     }
                     else{
-                        foward_neighbor = alt_chunk_lookup(chunk, total_x + 1, total_y, total_z) == 3;
+                        foward_neighbor = alt_chunk_lookup(chunk, total_x + 1, total_y, total_z) >= 2;
                     }
                     //back
                     if(moving_x == 0){
                         if(back_neighbor_chunk != NULL){
-                            back_neighbor = alt_chunk_lookup(back_neighbor_chunk, total_x - 1, total_y, total_z) == 3;
+                            back_neighbor = alt_chunk_lookup(back_neighbor_chunk, total_x - 1, total_y, total_z) >= 2;
                         }
                     }
                     else{
-                        back_neighbor = alt_chunk_lookup(chunk, total_x - 1, total_y, total_z) == 3;
+                        back_neighbor = alt_chunk_lookup(chunk, total_x - 1, total_y, total_z) >= 2;
                     }
                     OutVertex_t v1;
                     OutVertex_t v2;
@@ -1136,62 +1167,62 @@ class OnlineMeshMapper : public rclcpp::Node{
                     bool right_neighbor = true;
                     bool foward_neighbor = true;
                     bool back_neighbor = true;
-                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 3){
+                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 2){
                         continue;
                     }
                     //up
                     if(moving_z == ALT_CHUNK_LEN - 1){
                         if(upper_neighbor_chunk != NULL){
-                            up_neighbor = alt_chunk_lookup(upper_neighbor_chunk, total_x, total_y, total_z + 1) == 3;
+                            up_neighbor = alt_chunk_lookup(upper_neighbor_chunk, total_x, total_y, total_z + 1) >= 2;
                         }
                     }
                     else{
-                        up_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z + 1) == 3;
+                        up_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z + 1) >= 2;
                     }
                     //down
                     if(moving_z == 0){
                         if(lower_neighbor_chunk != NULL){
-                            down_neighbor = alt_chunk_lookup(lower_neighbor_chunk, total_x, total_y, total_z - 1) == 3;
+                            down_neighbor = alt_chunk_lookup(lower_neighbor_chunk, total_x, total_y, total_z - 1) >= 2;
                         }
                     }
                     else{
-                        down_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z - 1) == 3;
+                        down_neighbor = alt_chunk_lookup(chunk, total_x, total_y, total_z - 1) >= 2;
                     }
                     //left
                     if(moving_y == ALT_CHUNK_LEN - 1){
                         if(left_neighbor_chunk != NULL){
-                            left_neighbor = alt_chunk_lookup(left_neighbor_chunk, total_x, total_y + 1, total_z) == 3;
+                            left_neighbor = alt_chunk_lookup(left_neighbor_chunk, total_x, total_y + 1, total_z) >= 2;
                         }
                     }
                     else{
-                        left_neighbor = alt_chunk_lookup(chunk, total_x, total_y + 1, total_z) == 3;
+                        left_neighbor = alt_chunk_lookup(chunk, total_x, total_y + 1, total_z) >= 2;
                     }
                     //right
                     if(moving_y == 0){
                         if(right_neighbor_chunk != NULL){
-                            right_neighbor = alt_chunk_lookup(right_neighbor_chunk, total_x, total_y - 1, total_z) == 3;
+                            right_neighbor = alt_chunk_lookup(right_neighbor_chunk, total_x, total_y - 1, total_z) >= 2;
                         }
                     }
                     else{
-                        right_neighbor = alt_chunk_lookup(chunk, total_x, total_y - 1, total_z) == 3;
+                        right_neighbor = alt_chunk_lookup(chunk, total_x, total_y - 1, total_z) >= 2;
                     }
                     //foward
                     if(moving_x == ALT_CHUNK_LEN - 1){
                         if(foward_neighbor_chunk != NULL){
-                            foward_neighbor = alt_chunk_lookup(foward_neighbor_chunk, total_x + 1, total_y, total_z) == 3;
+                            foward_neighbor = alt_chunk_lookup(foward_neighbor_chunk, total_x + 1, total_y, total_z) >= 2;
                         }
                     }
                     else{
-                        foward_neighbor = alt_chunk_lookup(chunk, total_x + 1, total_y, total_z) == 3;
+                        foward_neighbor = alt_chunk_lookup(chunk, total_x + 1, total_y, total_z) >= 2;
                     }
                     //back
                     if(moving_x == 0){
                         if(back_neighbor_chunk != NULL){
-                            back_neighbor = alt_chunk_lookup(back_neighbor_chunk, total_x - 1, total_y, total_z) == 3;
+                            back_neighbor = alt_chunk_lookup(back_neighbor_chunk, total_x - 1, total_y, total_z) >= 2;
                         }
                     }
                     else{
-                        back_neighbor = alt_chunk_lookup(chunk, total_x - 1, total_y, total_z) == 3;
+                        back_neighbor = alt_chunk_lookup(chunk, total_x - 1, total_y, total_z) >= 2;
                     }
                     OutVertex_t v1;
                     OutVertex_t v2;
@@ -2109,7 +2140,7 @@ class OnlineMeshMapper : public rclcpp::Node{
         pcl::RandomSample<pcl::PointXYZ> rs;
         rs.setInputCloud(raw_cloud);
         //rs.setSample(raw_cloud->size() * 0.05f);
-        rs.setSample(scalar * 150);
+        rs.setSample(1000);
         rs.filter(*downsampled_cloud);
         Eigen::Quaternionf q(
                 global_point.orientation.w,
@@ -2242,7 +2273,7 @@ class OnlineMeshMapper : public rclcpp::Node{
             float x_dist_sq = x_dist * x_dist;
             float y_dist_sq = y_dist * y_dist;
             float z_dist_sq = z_dist * z_dist;
-            if(std::sqrt(x_dist_sq + y_dist_sq + z_dist_sq)){
+            if(std::sqrt(x_dist_sq + y_dist_sq + z_dist_sq) < 5 * scalar){
                 raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
             }
             /*
@@ -2429,7 +2460,7 @@ class OnlineMeshMapper : public rclcpp::Node{
                     int64_t total_x = base_x + moving_x;
                     int64_t total_y = base_y + moving_y;
                     int64_t total_z = base_z + moving_z;
-                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 3){
+                    if(alt_chunk_lookup(chunk, total_x, total_y, total_z) < 2){
                         continue;
                     }
                     else{
