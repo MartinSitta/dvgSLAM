@@ -21,13 +21,14 @@ find_package(octomap REQUIRED)
 find_package(octomap_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
+find_package(tf2_sensor_msgs REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
 add_library(lib_map_model lib/Chunk.c lib/GraphNode.c lib/HashUtils.c
     lib/murmur3.c lib/Vertex.c lib/VoxelGraph.c lib/AltChunk.c
-    lib/AltGraphNode.c lib/FibonacciHash.c)     
+    lib/AltGraphNode.c lib/FibonacciHash.c lib/AltGraphBitMap.c)     
 add_executable(online_mesh_mapper src/online_mesh_mapper.cpp)
 target_include_directories(online_mesh_mapper PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -37,7 +38,7 @@ target_compile_features(online_mesh_mapper PUBLIC c_std_99 cxx_std_17)  # Requir
 target_link_libraries(online_mesh_mapper lib_map_model)
 ament_target_dependencies(online_mesh_mapper rclcpp sensor_msgs mesh_msgs nav_msgs
     tf2_ros tf2 tf2_geometry_msgs geometry_msgs octomap octomap_msgs PCL
-    pcl_conversions)
+    pcl_conversions tf2_sensor_msgs)
 install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}/
