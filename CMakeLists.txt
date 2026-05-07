@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(online_mesh_mapper)
+project(dvg_slam)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Ofast)
@@ -15,6 +15,7 @@ find_package(mesh_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)                                                 
 find_package(tf2 REQUIRED)                                                      
 find_package(tf2_ros REQUIRED)                                                  
+find_package(tf2_eigen REQUIRED)                                                  
 find_package(tf2_geometry_msgs REQUIRED)                                        
 find_package(geometry_msgs REQUIRED)
 find_package(octomap REQUIRED)
@@ -28,22 +29,22 @@ find_package(tf2_sensor_msgs REQUIRED)
 
 add_library(lib_map_model lib/Chunk.c lib/GraphNode.c lib/HashUtils.c
     lib/murmur3.c lib/Vertex.c lib/VoxelGraph.c lib/AltChunk.c
-    lib/AltGraphNode.c lib/FibonacciHash.c lib/AltGraphBitMap.c)     
-add_executable(online_mesh_mapper src/online_mesh_mapper.cpp)
-target_include_directories(online_mesh_mapper PUBLIC
+    lib/AltGraphNode.c lib/FibonacciHash.c lib/AltGraphBitMap.c lib/VoxelHashMap.c lib/VoxelPriorityQueue.c)     
+add_executable(dvg_slam src/dvg_slam.cpp)
+target_include_directories(dvg_slam PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_compile_features(online_mesh_mapper PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(dvg_slam PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
-target_link_libraries(online_mesh_mapper lib_map_model)
-ament_target_dependencies(online_mesh_mapper rclcpp sensor_msgs mesh_msgs nav_msgs
+target_link_libraries(dvg_slam lib_map_model)
+ament_target_dependencies(dvg_slam rclcpp sensor_msgs mesh_msgs nav_msgs
     tf2_ros tf2 tf2_geometry_msgs geometry_msgs octomap octomap_msgs PCL
-    pcl_conversions tf2_sensor_msgs)
+    pcl_conversions tf2_sensor_msgs tf2_eigen)
 install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}/
 )
-install(TARGETS online_mesh_mapper
+install(TARGETS dvg_slam
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

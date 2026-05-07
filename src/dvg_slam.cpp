@@ -31,6 +31,8 @@
 #include <pcl/filters/random_sample.h>
 #include <pcl/filters/filter.h>
 #include "../lib/VoxelGraph.h"
+#include "../lib/VoxelHashMap.h"
+#include "../lib/VoxelPriorityQueue.h"
 #include "mesh_msgs/msg/mesh_geometry_stamped.hpp"
 // ROS / messages
 #include "octomap_msgs/msg/octomap.hpp"
@@ -171,7 +173,7 @@ class DvgSlam : public rclcpp::Node{
         }
         RCLCPP_INFO(this->get_logger(), "initializing topics\n");
         publisher_ = this->create_publisher<mesh_msgs::msg::MeshGeometryStamped>(out_topic, 1);
-        timer_ = this->create_wall_timer(
+        mesh_timer = this->create_wall_timer(
         1000ms, std::bind(&DvgSlam::timer_callback, this));
         if(topic != ""){
             subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
@@ -191,8 +193,10 @@ class DvgSlam : public rclcpp::Node{
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         publisher_two = this->create_publisher<nav_msgs::msg::Odometry>("debug_map_pose", 1);
-        timer_two = this->create_wall_timer(
+        pose_timer = this->create_wall_timer(
         10ms, std::bind(&DvgSlam::debug_map_pose_callback, this));
+        nav_timer = this->create_wall_timer(
+        2000ms, std::bind(&DvgSlam::nav_callback, this));
         current_odom_msg_pose.position.x = 0;
         current_odom_msg_pose.position.y = 0;
         current_odom_msg_pose.position.z = 0;
@@ -294,10 +298,10 @@ class DvgSlam : public rclcpp::Node{
             if(current_del_count >=  max_deletions){
                 return;
             }
-            if(point_detected){
+           if(point_detected){
                 DoubleVector_t voxel_normal = build_voxel_local_normal(normal, travel_x, travel_y, travel_z, 6);
                 double angle = voxel_normal.x * normal.x + voxel_normal.y * normal.y + voxel_normal.z * normal.z;
-                if(angle <= -0.1){
+                if(angle <= -0.3){
                     if(splash_delete){
                         for(int64_t splash_x = travel_x - (splash_diameter / 2);splash_x <= travel_x + (splash_diameter / 2); splash_x++){
                             for(int64_t splash_y = travel_y - (splash_diameter / 2);splash_y <= travel_y + (splash_diameter / 2); splash_y++){
@@ -325,7 +329,7 @@ class DvgSlam : public rclcpp::Node{
              int64_t dest_x, int64_t dest_y, int64_t dest_z){
         return labs(org_x - dest_x) + labs(org_y - dest_y) + labs(org_z - dest_z);
     }
-    int64_t get_euclidean_dist(int64_t org_x, int64_t org_y, int64_t org_z,
+    float get_euclidean_dist(int64_t org_x, int64_t org_y, int64_t org_z,
              int64_t dest_x, int64_t dest_y, int64_t dest_z){
         float x_dist = org_x - dest_x;
         float y_dist = org_y - dest_y;
@@ -2076,8 +2080,9 @@ class DvgSlam : public rclcpp::Node{
     uint32_t chunk_amount;
     uint32_t scalar;
     std::string obj_filepath;
-    rclcpp::TimerBase::SharedPtr timer_;
-    rclcpp::TimerBase::SharedPtr timer_two;
+    rclcpp::TimerBase::SharedPtr mesh_timer;
+    rclcpp::TimerBase::SharedPtr pose_timer;
+    rclcpp::TimerBase::SharedPtr nav_timer;
     rclcpp::Publisher<mesh_msgs::msg::MeshGeometryStamped>::SharedPtr publisher_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr publisher_two;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;
@@ -2269,47 +2274,46 @@ class DvgSlam : public rclcpp::Node{
         dynamic_map_entry_cap = dynamic_map_entry_cap * 0.7;
         const auto pc_start = std::chrono::steady_clock::now();
         int64_t sample_ratio = 20;
+        VoxelHashMap_t* hashmap = voxel_hash_map_init(16000, 10, 0.5f);
         for(const auto &p : transformed_cloud->points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
-            current_sample++;
-            float x_dist = (float)x_point - (float)robot_point_x;
-            float y_dist = (float)y_point - (float)robot_point_y;
-            float z_dist = (float)z_point - (float)robot_point_z;
-            float x_dist_sq = x_dist * x_dist;
-            float y_dist_sq = y_dist * y_dist;
-            float z_dist_sq = z_dist * z_dist;
-            if(std::sqrt(x_dist_sq + y_dist_sq + z_dist_sq) < 5 * scalar){
-                raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
-            }
-            /*
-            if(z_point > (int64_t)(global_point.position.z * (float) scalar)){
-                raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
-            }
-            */
-            /*
-            if(current_sample >= sample_ratio){
-                //RCLCPP_INFO(this->get_logger(), "raycast debug!");
-                if(z_point > global_point.position.z * (float) scalar){
-                    raycast_delete(robot_point_x, robot_point_y, robot_point_z, x_point, y_point, z_point, true);
-                }
-
-                //
-                //RCLCPP_INFO(this->get_logger(), "raycast done!");
-                current_sample = 0;
-            }
-            */
-            
-            
+            voxel_hash_map_insert(hashmap, x_point, y_point, z_point);
         }
+        for(int64_t cnt = 0; cnt < hashmap->capacity; cnt++){
+            if(hashmap->slots[cnt].state == SLOT_OCCUPIED){
+                int64_t x = hashmap->slots[cnt].key.x;
+                int64_t y = hashmap->slots[cnt].key.y;
+                int64_t z = hashmap->slots[cnt].key.z;
+                float x_dist = (float)x - (float)robot_point_x;
+                float y_dist = (float)y - (float)robot_point_y;
+                float z_dist = (float)z - (float)robot_point_z;
+                float x_dist_sq = x_dist * x_dist;
+                float y_dist_sq = y_dist * y_dist;
+                float z_dist_sq = z_dist * z_dist;
+                if(std::sqrt(x_dist_sq + y_dist_sq + z_dist_sq) < 5 * scalar){
+                    raycast_delete(robot_point_x, robot_point_y, robot_point_z, x, y, z, true);
+                }
+            }
+        }
+        /*
         for(const auto &p : transformed_cloud->points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
             int64_t z_point = p.z;
             voxel_graph_insert(graph, x_point, y_point, z_point);
         }
-
+        */
+        for(int64_t cnt = 0; cnt < hashmap->capacity;cnt++){
+            if(hashmap->slots[cnt].state == SLOT_OCCUPIED){
+                int64_t x = hashmap->slots[cnt].key.x;
+                int64_t y = hashmap->slots[cnt].key.y;
+                int64_t z = hashmap->slots[cnt].key.z;
+                voxel_graph_insert(graph, x, y, z);
+            }
+        }
+        voxel_hash_map_free(hashmap);
         const auto pc_end = std::chrono::steady_clock::now();
         auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(pc_end - pc_start);
         RCLCPP_INFO(this->get_logger(), "entering the pointcloud took %d ms", diff.count());
@@ -2726,7 +2730,63 @@ class DvgSlam : public rclcpp::Node{
         RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ms", diff.count());
         io_mutex.unlock();
     }
-    
+    void nav_callback(){
+        int64_t horizontal_clearance = 0.5 * (float) scalar;
+        int64_t vertical_clearance = 1.2 * (float) scalar;
+        voxel_graph_build_inflation(graph, horizontal_clearance, vertical_clearance);
+        VoxelHashMap_t* nodes = voxel_hash_map_init(1<<17, 10, 0.5);
+        VoxelPriorityQueue_t* prio_queue = voxel_priority_queue_init(1<<17);
+        int64_t starting_x = global_point.position.x * (float) scalar;
+        int64_t starting_y = global_point.position.y * (float) scalar;
+        int64_t starting_z = global_point.position.z * (float) scalar;
+        int64_t goal_x = 0;
+        int64_t goal_y = 0;
+        int64_t goal_z = 0;
+        starting_z += vertical_clearance / 2 + 1;
+        if(voxel_graph_lookup_inflation(graph, starting_x, starting_y, starting_z)){
+            return;
+        }
+        bool first_node = true;
+        bool exit_con = false;
+        while(!exit_con){
+            if(first_node){
+                first_node = false;
+                PointSlot_t* starting_slot = voxel_hash_map_insert(nodes, starting_x, starting_y, starting_z);
+                starting_slot->traveled_dist = 0.0f;
+                voxel_priority_queue_enqueue(prio_queue, starting_slot);
+            }
+            PointSlot_t* current_point = voxel_priority_queue_dequeue(prio_queue);
+            if(current_point == NULL){
+                exit_con = true;
+                continue;
+            }
+            current_point->visited = true;
+            for(int64_t x = current_point->key.x - 1; x <= current_point->key.x + 1; x++){
+                for(int64_t y = current_point->key.y - 1; x <= current_point->key.y + 1; y++){
+                    for(int64_t z = current_point->key.z - 1; x <= current_point->key.z + 1; z++){
+                        if(x != current_point->key.x && y != current_point->key.y && z != current_point->key.z && 
+                            !voxel_graph_lookup_inflation(graph, x, y, z)){
+                            PointSlot_t* next_point = voxel_hash_map_insert(nodes, x, y, z);
+                            float dist_from_current = get_euclidean_dist(x, y, z, current_point->key.x, current_point->key.y, current_point->key.z);
+                            if(current_point->traveled_dist + dist_from_current < next_point->traveled_dist){
+                                next_point->traveled_dist = current_point->traveled_dist + dist_from_current;
+                                next_point->prev_point = current_point;
+                            }
+                            if(next_point->key.x == goal_x && next_point->key.y == goal_y && next_point->key.z == goal_z){
+                                exit_con = true;
+                            }
+                            if(!next_point->visited){
+                                voxel_priority_queue_enqueue(prio_queue, next_point);
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+
+
+    }
 };
 
 int main(int argc, char ** argv)

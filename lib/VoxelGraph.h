@@ -29,7 +29,10 @@ uint8_t voxel_graph_lookup(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z)
 AltChunk_t* voxel_graph_chunk_hash_table_request(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
 AltChunk_t* voxel_graph_chunk_hash_table_lookup(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
 AltChunk_t* voxel_graph_create_chunk(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
-
+void voxel_graph_build_inflation(VoxelGraph_t* graph, int64_t horizontal_inflation, int64_t vertical_inflation);
+bool voxel_graph_insert_inflation(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
+bool voxel_graph_delete_inflation(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
+bool voxel_graph_lookup_inflation(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
 void voxel_graph_enter_neighbours(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
 void voxel_graph_delete_neighbours(VoxelGraph_t* graph, int64_t x, int64_t y, int64_t z);
 #ifdef __cplusplus

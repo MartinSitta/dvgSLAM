@@ -12,6 +12,7 @@ extern "C" {
 #include <stddef.h>                                                             
 #include <stdbool.h>
 #include <assert.h>
+#include <stdlib.h>
 #define ALT_CHUNK_ARR_SIZE 1024
 #define ALT_CHUNK_LEN 16
 
@@ -39,6 +40,7 @@ int64_t alt_chunk_build_anchor_coord(int64_t coord);
 void alt_chunk_insert_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z);
 void alt_chunk_delete_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z);
 bool alt_chunk_lookup_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z);
+void alt_chunk_free_inflation(AltChunk_t* chunk);
 void alt_chunk_init(AltChunk_t* chunk);
 void alt_chunk_insert(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z);
 void alt_chunk_delete(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z);

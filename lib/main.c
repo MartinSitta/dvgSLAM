@@ -2,6 +2,8 @@
 #include "Chunk.h"
 #include "VoxelGraph.h"
 #include "HashUtils.h"
+#include "VoxelHashMap.h"
+#include "VoxelPriorityQueue.h"
 
 int main(){
     printf("%ld\n", sizeof(GraphNode_t));
@@ -37,6 +39,7 @@ int main(){
     assert(chunk->x_offset == 0);
     assert(chunk->y_offset == 0);
     assert(chunk->z_offset == 0);
+    assert(chunk->change_occurred == true);
     //assert(chunk->current_node_index == 2);
     //assert(chunk->nodes[1].coord_and_mesh_info.vertex_coords != 0);
     assert(alt_chunk_lookup(chunk, 2, 2, 2));
@@ -158,10 +161,72 @@ int main(){
     assert(!vertex_get_foward_bit(&chunk->nodes[chunk_node_index_1].coord_and_mesh_info));
     assert(!vertex_get_back_bit(&chunk_three->nodes[chunk_node_index_2].coord_and_mesh_info));
     */
+    printf("performing inflation tests\n");
+    voxel_graph_build_inflation(graph, 3, 3);
+    assert(chunk->change_occurred == false);
+    assert(voxel_graph_lookup_inflation(graph,1,1,1));
+    assert(voxel_graph_lookup_inflation(graph,0,0,0));
+    assert(voxel_graph_lookup_inflation(graph,2,2,2));
+    assert(!voxel_graph_lookup_inflation(graph,1,1,3));
+    printf("inflation tests passed!\n");
     printf("checking hashing metrics logic\n");
     assert(graph->total_hash_table_insertions != graph->total_hash_collisions);
     printf("%ld insertions have been performed, %ld hash collosions have occurred\n", graph->total_hash_table_insertions, graph->total_hash_collisions);
     voxel_graph_free(&graph);
-    printf("all tests passed\n");
+    printf("all voxelgraph tests passed\n");
+
+    printf("initiaing hashmap tests:\n");
+    VoxelHashMap_t* hashmap = voxel_hash_map_init(2, 10, 0.5f);
+    assert(hashmap != NULL);
+    assert(hashmap->capacity == 2);
+    PointSlot_t* sanity_check = voxel_hash_map_insert(hashmap, 1, 2, 3);
+    assert(sanity_check != NULL);
+    assert(sanity_check->state == SLOT_OCCUPIED);
+    assert(sanity_check->key.x == 1);
+    assert(sanity_check->key.y == 2);
+    assert(sanity_check->key.z == 3);
+    PointSlot_t* lookup_test = voxel_hash_map_lookup(hashmap, 1, 2, 3);
+    assert(lookup_test == sanity_check);
+
+    PointSlot_t* resize_sanity_check = voxel_hash_map_insert(hashmap, 2, 3, 4);
+    assert(hashmap->capacity == 4);
+    int64_t slots_occupied = hashmap->occupied_slot_count;
+    PointSlot_t* resize_sanity_duplicate_insertion = voxel_hash_map_insert(hashmap, 1, 2, 3);
+    assert(resize_sanity_duplicate_insertion != NULL);
+    assert(hashmap->occupied_slot_count == slots_occupied);
+    assert(voxel_hash_map_remove(hashmap, 1, 2, 3));
+    int64_t dead_slots = 1;
+    assert(slots_occupied - 1 == hashmap->occupied_slot_count);
+    slots_occupied--;
+    assert(dead_slots == hashmap->tombstome_count);
+    assert(!voxel_hash_map_remove(hashmap, 1, 2, 3));
+    assert(slots_occupied == hashmap->occupied_slot_count);
+    assert(dead_slots == hashmap->tombstome_count);
+    voxel_hash_map_insert(hashmap, 1, 2, 3);
+    assert(slots_occupied + 1 == hashmap->occupied_slot_count);
+    slots_occupied++;
+    assert(dead_slots - 1 == hashmap->tombstome_count);
+    dead_slots--;
+    PointSlot_t* slot1 = voxel_hash_map_insert(hashmap, 1, 2, 3);
+    slot1->astar_heuristic = 1.0;
+    slot1->traveled_dist = 2.0;
+    PointSlot_t* slot2 = voxel_hash_map_insert(hashmap, 2, 2, 3);
+    slot2->astar_heuristic = 2.0;
+    slot2->traveled_dist = 2.0;
+    PointSlot_t* slot3 = voxel_hash_map_insert(hashmap, 3, 2, 3);
+    slot3->astar_heuristic = 1.0;
+    slot3->traveled_dist = 0;
+    PointSlot_t* slot4 = voxel_hash_map_insert(hashmap, 4, 2, 3);
+    slot4->astar_heuristic = 4.0;
+    slot4->traveled_dist = 2.0;
+    VoxelPriorityQueue_t* prio_queue = voxel_priority_queue_init(3);
+    voxel_priority_queue_enqueue(prio_queue, slot1);
+    voxel_priority_queue_enqueue(prio_queue, slot2);
+    voxel_priority_queue_enqueue(prio_queue, slot3);
+    voxel_priority_queue_enqueue(prio_queue, slot4);
+    assert(voxel_priority_queue_peek(prio_queue) == slot3);
+    voxel_priority_queue_free(prio_queue);
+    voxel_hash_map_free(hashmap);
+    printf("all hash map tests passed\n");
     return 0;
 }

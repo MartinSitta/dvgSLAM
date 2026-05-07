@@ -26,7 +26,11 @@ void alt_chunk_init(AltChunk_t* chunk){
     chunk->occupancy_bit_two = alt_graph_bit_map_init();
     chunk->inflation = NULL;
 }
-
+void alt_chunk_free_inflation(AltChunk_t* chunk){
+    if(chunk->inflation != NULL){
+        free(chunk->inflation);
+    }
+}
 uint8_t alt_chunk_get_occupancy(AltChunk_t* chunk, uint16_t node_nr){
     assert(chunk != NULL);
     assert(node_nr < ALT_CHUNK_LEN * ALT_CHUNK_LEN * ALT_CHUNK_LEN);
@@ -41,6 +45,10 @@ void alt_chunk_increase_occupancy(AltChunk_t* chunk, uint16_t node_nr){
     bool bit_one = alt_graph_bit_map_get_bit(&chunk->occupancy_bit_one, node_nr);
     bool bit_two = alt_graph_bit_map_get_bit(&chunk->occupancy_bit_two, node_nr);
     uint8_t number = bit_one | bit_two << 1;
+    if(number == 3){
+        return;
+    }
+    chunk->change_occurred = true;
     number += 2;
     if(number > 3){
         number = 3;
@@ -70,6 +78,7 @@ void alt_chunk_decrease_occupancy(AltChunk_t* chunk, uint16_t node_nr){
     if(!number){
         return;
     }
+    chunk->change_occurred = true;
     number--;
     bool write_bit_one = number & 1;
     bool write_bit_two = number & 2;
@@ -90,7 +99,11 @@ void alt_chunk_decrease_occupancy(AltChunk_t* chunk, uint16_t node_nr){
 
 void alt_chunk_insert_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z){
     assert(chunk != NULL);
-    assert(chunk->inflation != NULL);
+    if(chunk->inflation == NULL){
+        AltGraphBitMap_t bitmap= alt_graph_bit_map_init();
+        chunk->inflation = malloc(sizeof(AltGraphBitMap_t));
+        *chunk->inflation = bitmap;
+    }
     int16_t rel_x = x - chunk->x_offset;
     int16_t rel_y = y - chunk->y_offset;
     int16_t rel_z = z - chunk->z_offset;
@@ -102,7 +115,11 @@ void alt_chunk_insert_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t
 }
 void alt_chunk_delete_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z){
     assert(chunk != NULL);
-    assert(chunk->inflation != NULL);
+    if(chunk->inflation == NULL){
+        AltGraphBitMap_t bitmap= alt_graph_bit_map_init();
+        chunk->inflation = malloc(sizeof(AltGraphBitMap_t));
+        *chunk->inflation = bitmap;
+    }
     int16_t rel_x = x - chunk->x_offset;
     int16_t rel_y = y - chunk->y_offset;
     int16_t rel_z = z - chunk->z_offset;
@@ -114,7 +131,9 @@ void alt_chunk_delete_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t
 }
 bool alt_chunk_lookup_inflation(AltChunk_t* chunk, int64_t x, int64_t y, int64_t z){
     assert(chunk != NULL);
-    assert(chunk->inflation != NULL);
+    if(chunk->inflation == NULL){
+        return false;
+    }
     int16_t rel_x = x - chunk->x_offset;
     int16_t rel_y = y - chunk->y_offset;
     int16_t rel_z = z - chunk->z_offset;

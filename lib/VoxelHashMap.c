@@ -17,13 +17,13 @@ static inline int64_t get_next_pow_of_2(uint64_t in){
     if(!in){
         return 0;
     }
-    return in;
+    return in + 1;
 }
 static inline PointSlot_t* get_slot(VoxelHashMap_t* hashmap, uint64_t hash){
     hash = hash & (hashmap->capacity - 1);
     return &hashmap->slots[hash];
 }
-static inline bool attempt_insertion(PointSlot_t* slot, int64_t x, int64_t y, int64_t z){
+static inline uint8_t attempt_insertion(PointSlot_t* slot, int64_t x, int64_t y, int64_t z){
     switch (slot->state)
     {
     case SLOT_EMPTY:
@@ -31,27 +31,27 @@ static inline bool attempt_insertion(PointSlot_t* slot, int64_t x, int64_t y, in
         slot->key.x = x;
         slot->key.y = y;
         slot->key.z = z;
-        return true;
+        return 1;
         break;
     case SLOT_OCCUPIED:
         if(!point_equals(&slot->key, x, y, z)){
-            return false;
+            return 0;
         }
-        return true;
+        return 2;
         break;
     case SLOT_TOMBSTONE:
         if(point_equals(&slot->key, x, y, z)){
             slot->state = SLOT_OCCUPIED;
-            return true;
+            return 3;
         }
-        return false;
+        return 0;
         break; 
     default:
-        return false;
+        return 0;
         break;
     }
 }
-static inline bool attempt_removal(PointSlot_t* slot, int64_t x, int64_t y, int64_t z){
+static inline bool attempt_deletion(PointSlot_t* slot, int64_t x, int64_t y, int64_t z){
     if(!point_equals(&slot->key, x, y, z)){
         return false;
     }
@@ -73,16 +73,27 @@ static inline bool attempt_removal(PointSlot_t* slot, int64_t x, int64_t y, int6
     }
 }
 
-PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z, uint64_t known_hash){
+static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z, uint64_t known_hash){
     assert(hashmap != NULL);
-    if((hashmap->tombstome_count + hashmap->occupied_slot_count + 1) / hashmap->load_factor_threshold){
-        resize(hashmap);
-    }
     uint64_t hash = known_hash;
     PointSlot_t* initial_slot = get_slot(hashmap, hash);
-    if(attempt_insertion(initial_slot, x, y, z)){
+    uint8_t return_code = attempt_insertion(initial_slot, x, y, z);
+    if(return_code){
         initial_slot->raw_hash = hash;
-        hashmap->occupied_slot_count++;
+        switch (return_code)
+        {
+        case 1:
+            hashmap->occupied_slot_count++;
+            /* code */
+            break;
+        case 2:
+            break;
+        case 3:
+            hashmap->occupied_slot_count++;
+            hashmap->tombstome_count--;
+        default:
+            break;
+        }
         return initial_slot;
     }
     else{
@@ -90,16 +101,30 @@ PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t* hashmap, int6
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
-            if(attempt_insertion(probe_slot, x, y, z)){
+            uint8_t return_code_two = attempt_insertion(probe_slot, x, y, z);
+            if(return_code_two){
                 probe_slot->raw_hash = hash;
+                switch (return_code_two)
+                {
+                case 1:
+                    hashmap->occupied_slot_count++;
+                    /* code */
+                    break;
+                case 2:
+                    break;
+                case 3:
+                    hashmap->occupied_slot_count++;
+                    hashmap->tombstome_count--;
+                default:
+                    break;
+                }
+
                 hashmap->occupied_slot_count++;
                 return probe_slot;
             }
         }
     }
-    resize(hashmap); // this part of the code only triggers when the probe chain length is longer than 10
-    voxel_hash_map_insert(hashmap, x, y, z);//IE. more than 10 hash collisions have occured in one lookup
-    
+    return NULL;
 }
 
 static inline void resize(VoxelHashMap_t* hashmap){
@@ -111,6 +136,7 @@ static inline void resize(VoxelHashMap_t* hashmap){
     uint64_t old_capacity = hashmap->capacity;
     hashmap->capacity = hashmap->capacity << 1;
     hashmap->tombstome_count = 0;
+    hashmap->occupied_slot_count = 0;
     hashmap->slots = new_array;
     for(uint64_t cnt = 0; cnt < hashmap->capacity; cnt++){
         hashmap->slots[cnt].key.x = 0;
@@ -118,45 +144,27 @@ static inline void resize(VoxelHashMap_t* hashmap){
         hashmap->slots[cnt].key.z = 0;
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
+        hashmap->slots[cnt].traveled_dist = 999999999.0f;
+        hashmap->slots[cnt].astar_heuristic = 0;
+        hashmap->slots[cnt].prev_point = NULL;
+        hashmap->slots[cnt].visited = false;
     }
     for(uint64_t cnt = 0; cnt < old_capacity; cnt++){
         int64_t x = old_array[cnt].key.x;
-        int64_t y = old_array[cnt].key.x;
-        int64_t z = old_array[cnt].key.x;
+        int64_t y = old_array[cnt].key.y;
+        int64_t z = old_array[cnt].key.z;
         uint64_t hash = old_array[cnt].raw_hash;
-        voxel_hash_map_insert_with_known_hash(hashmap, x, y, z, hash);
+        if(old_array[cnt].state == SLOT_OCCUPIED){
+            PointSlot_t* new_slot = voxel_hash_map_insert_with_known_hash(hashmap, x, y, z, hash);
+            new_slot->astar_heuristic = old_array[cnt].astar_heuristic;
+            new_slot->traveled_dist = old_array[cnt].traveled_dist;
+            new_slot->prev_point = old_array[cnt].prev_point;
+            new_slot->visited = old_array[cnt].visited;
+        }
     }
     free(old_array);
 }
 //end helpers
-PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z){
-    assert(hashmap != NULL);
-    if((hashmap->tombstome_count + hashmap->occupied_slot_count + 1) / hashmap->load_factor_threshold){
-        resize(hashmap);
-    }
-    uint64_t hash = build_fibonacci_hash_from_coords(x, y, z);
-    PointSlot_t* initial_slot = get_slot(hashmap, hash);
-    if(attempt_insertion(initial_slot, x, y, z)){
-        initial_slot->raw_hash = hash;
-        hashmap->occupied_slot_count++;
-        return initial_slot;
-    }
-    else{
-        uint64_t raw_double_hash = fibonacci_doublehash(hash);
-        for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
-            uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
-            PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
-            if(attempt_insertion(probe_slot, x, y, z)){
-                probe_slot->raw_hash = hash;
-                hashmap->occupied_slot_count++;
-                return probe_slot;
-            }
-        }
-    }
-    resize(hashmap); // this part of the code only triggers when the probe chain length is longer than 10
-    voxel_hash_map_insert(hashmap, x, y, z);//IE. more than 10 hash collisions have occured in one lookup
-    
-}
 VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_chain_limit, float max_load_factor){
     VoxelHashMap_t* hashmap = malloc(sizeof(VoxelHashMap_t));
     hashmap->max_probe_chain_len = probe_chain_limit;
@@ -171,23 +179,43 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
         hashmap->slots[cnt].key.z = 0;
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
+        hashmap->slots[cnt].traveled_dist = 999999999.0f;
+        hashmap->slots[cnt].astar_heuristic = 0.0f;
+        hashmap->slots[cnt].prev_point = NULL;
     }
+    return hashmap;
 }
 
-void voxel_hashmap_free(VoxelHashMap_t* hashmap){
+void voxel_hash_map_free(VoxelHashMap_t* hashmap){
     free(hashmap->slots);
     free(hashmap);
 }
 PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z){
     assert(hashmap != NULL);
-    if((hashmap->tombstome_count + hashmap->occupied_slot_count + 1) / hashmap->load_factor_threshold){
+    int64_t total_slot_count = hashmap->occupied_slot_count + hashmap->tombstome_count;
+    float load_factor = (float)total_slot_count / (float)hashmap->capacity;
+    if(load_factor >= hashmap->load_factor_threshold){
         resize(hashmap);
     }
     uint64_t hash = build_fibonacci_hash_from_coords(x, y, z);
     PointSlot_t* initial_slot = get_slot(hashmap, hash);
-    if(attempt_insertion(initial_slot, x, y, z)){
+    uint8_t return_code = attempt_insertion(initial_slot, x, y, z);
+    if(return_code){
         initial_slot->raw_hash = hash;
-        hashmap->occupied_slot_count++;
+        switch (return_code)
+        {
+        case 1:
+            hashmap->occupied_slot_count++;
+            /* code */
+            break;
+        case 2:
+            break;
+        case 3:
+            hashmap->occupied_slot_count++;
+            hashmap->tombstome_count--;
+        default:
+            break;
+        }
         return initial_slot;
     }
     else{
@@ -195,8 +223,24 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
-            if(attempt_insertion(probe_slot, x, y, z)){
+            uint8_t return_code_two = attempt_insertion(probe_slot, x, y, z);
+            if(return_code_two){
                 probe_slot->raw_hash = hash;
+                switch (return_code_two)
+                {
+                case 1:
+                    hashmap->occupied_slot_count++;
+                    /* code */
+                    break;
+                case 2:
+                    break;
+                case 3:
+                    hashmap->occupied_slot_count++;
+                    hashmap->tombstome_count--;
+                default:
+                    break;
+                }
+
                 hashmap->occupied_slot_count++;
                 return probe_slot;
             }
@@ -210,6 +254,9 @@ PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y
     assert(hashmap != NULL);
     uint64_t hash = build_fibonacci_hash_from_coords(x, y, z);
     PointSlot_t* initial_slot = get_slot(hashmap, hash);
+    if(initial_slot->state == SLOT_EMPTY){
+        return NULL;
+    }
     if(point_equals(&initial_slot->key, x, y, z)){
         return initial_slot;
     }
@@ -218,6 +265,9 @@ PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
+            if(probe_slot->state == SLOT_EMPTY){
+                return NULL;
+            }
             if(point_equals(&probe_slot->key, x, y, z)){
                 return probe_slot;
             }
