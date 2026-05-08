@@ -27,7 +27,6 @@ typedef struct PointSlot_t{
     float astar_heuristic;
     float traveled_dist;
     bool visited;
-    bool inserted_into_prio_queue;
     bool has_prev;
 }PointSlot_t;
 

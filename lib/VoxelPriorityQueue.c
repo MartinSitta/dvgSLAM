@@ -38,6 +38,7 @@ static inline void heapify_down(Point_t* heap, int64_t index,
 
 void resize(VoxelPriorityQueue_t* queue){
     Point_t* new_array = malloc(sizeof(Point_t) * queue->capacity * 2);
+    assert(new_array != NULL);
     for(int64_t cnt = 0; cnt < queue->capacity; cnt++){
         new_array[cnt] = queue->array[cnt];
     }
@@ -47,7 +48,7 @@ void resize(VoxelPriorityQueue_t* queue){
         new_array[cnt].z = 0;
     }
     queue->capacity = queue->capacity * 2;
-    PointSlot_t** old_array = queue->array;
+    Point_t* old_array = queue->array;
     queue->array = new_array;
     free(old_array);
 }
@@ -82,11 +83,10 @@ void voxel_priority_queue_enqueue(VoxelPriorityQueue_t* queue,
                                     Point_t key,
                                     VoxelHashMap_t* nodes){
     PointSlot_t* slot = voxel_hash_map_lookup(nodes, key.x, key.y, key.z);
-    if(slot == NULL || slot->inserted_into_prio_queue) return;
+    if(slot == NULL) return;
     if(queue->current_element >= queue->capacity) resize(queue);
     queue->array[queue->current_element] = key;
     heapify_up(queue->array, queue->current_element, nodes);
-    slot->inserted_into_prio_queue = true;
     queue->current_element++;
 }
 DequeueRetObject_t voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue,
@@ -99,7 +99,6 @@ DequeueRetObject_t voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue,
     Point_t output_key = queue->array[0]; // return pointer to key in queue
     PointSlot_t* slot = voxel_hash_map_lookup(nodes, output_key.x, 
                                                output_key.y, output_key.z);
-    if(slot) slot->inserted_into_prio_queue = false;
     queue->current_element--;
     queue->array[0] = queue->array[queue->current_element];
     heapify_down(queue->array, 0, queue->current_element, nodes);
@@ -108,5 +107,6 @@ DequeueRetObject_t voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue,
     return ret;
 }
 Point_t* voxel_priority_queue_peek(VoxelPriorityQueue_t* queue){
+    if(queue->current_element = 0) return NULL;
     return &queue->array[0];
 }

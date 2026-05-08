@@ -128,7 +128,8 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
 }
 
 static inline void resize(VoxelHashMap_t* hashmap){
-    PointSlot_t* new_array = malloc(sizeof(PointSlot_t) * hashmap->capacity << 1);
+    PointSlot_t* new_array = malloc(sizeof(PointSlot_t) * (hashmap->capacity << 1));
+    assert(new_array != NULL);
     if(new_array == NULL){
         return;
     }
@@ -151,7 +152,6 @@ static inline void resize(VoxelHashMap_t* hashmap){
         hashmap->slots[cnt].astar_heuristic = 0.0f;
         hashmap->slots[cnt].has_prev = 0;
         hashmap->slots[cnt].visited = false;
-        hashmap->slots[cnt].inserted_into_prio_queue = false;
     }
     for(uint64_t cnt = 0; cnt < old_capacity; cnt++){
         int64_t x = old_array[cnt].key.x;
@@ -165,7 +165,6 @@ static inline void resize(VoxelHashMap_t* hashmap){
             new_slot->traveled_dist = old_array[cnt].traveled_dist;
             new_slot->has_prev = old_array[cnt].has_prev;
             new_slot->visited = old_array[cnt].visited;
-            new_slot->inserted_into_prio_queue = old_array[cnt].inserted_into_prio_queue;
         }
     }
     free(old_array);
@@ -190,7 +189,6 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
         hashmap->slots[cnt].state = SLOT_EMPTY;
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
         hashmap->slots[cnt].astar_heuristic = 0.0f;
-        hashmap->slots[cnt].inserted_into_prio_queue = false;
         hashmap->slots[cnt].has_prev = 0;
     }
     return hashmap;
@@ -253,7 +251,6 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
                     break;
                 }
 
-                hashmap->occupied_slot_count++;
                 return probe_slot;
             }
         }

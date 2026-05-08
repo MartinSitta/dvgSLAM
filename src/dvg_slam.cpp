@@ -2734,19 +2734,23 @@ class DvgSlam : public rclcpp::Node{
         io_mutex.unlock();
     }
     void nav_callback(){
-        RCLCPP_INFO(this->get_logger(), "entering the pathfinding function");
+        std::thread t1(DvgSlam::do_astar_pathfinding, this);
+        t1.detach();
+    }
+    static void do_astar_pathfinding(DvgSlam* self){
+        RCLCPP_INFO(self->get_logger(), "entering the pathfinding function");
         static const float neighbor_costs[4]{0.0f, 1.0f, 1.41421356f, 1.73205081f};
-        int64_t horizontal_clearance = 0.5 * (float) scalar;
-        int64_t vertical_clearance = 1.2 * (float) scalar;
-        voxel_graph_build_inflation(graph, horizontal_clearance, vertical_clearance);
+        int64_t horizontal_clearance = 0.5 * (float) self->scalar;
+        int64_t vertical_clearance = 1.2 * (float) self->scalar;
+        voxel_graph_build_inflation(self->graph, horizontal_clearance, vertical_clearance);
         VoxelHashMap_t* nodes = voxel_hash_map_init(1<<17, 10, 0.5);
         VoxelPriorityQueue_t* prio_queue = voxel_priority_queue_init(1<<17);
-        int64_t starting_x = global_point.position.x * (float) scalar;
-        int64_t starting_y = global_point.position.y * (float) scalar;
-        int64_t starting_z = global_point.position.z * (float) scalar;
-        int64_t goal_x = 2.0f * (float) scalar;
-        int64_t goal_y = 0.0f * (float) scalar;
-        int64_t goal_z = 0.0f * (float) scalar;
+        int64_t starting_x = self->global_point.position.x * (float) self->scalar;
+        int64_t starting_y = self->global_point.position.y * (float) self->scalar;
+        int64_t starting_z = self->global_point.position.z * (float) self->scalar;
+        int64_t goal_x = 2.0f * (float) self->scalar;
+        int64_t goal_y = 0.0f * (float) self->scalar;
+        int64_t goal_z = 0.0f * (float) self->scalar;
         starting_z += vertical_clearance / 2 + 1;
         goal_z += vertical_clearance / 2 + 1;
         if(starting_x == goal_x && starting_y == goal_y && starting_z == goal_z){
@@ -2755,19 +2759,19 @@ class DvgSlam : public rclcpp::Node{
             return;
         }
         
-        if(voxel_graph_lookup_inflation(graph, starting_x, starting_y, starting_z)){
+        if(voxel_graph_lookup_inflation(self->graph, starting_x, starting_y, starting_z)){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
             return;
         }
-        if(voxel_graph_lookup_inflation(graph, goal_x, goal_y, goal_z)){
+        if(voxel_graph_lookup_inflation(self->graph, goal_x, goal_y, goal_z)){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
             return;
         }
         bool first_node = true;
         bool exit_con = false;
-        RCLCPP_INFO(this->get_logger(), "starting pathfinding algorithm");
+        RCLCPP_INFO(self->get_logger(), "starting pathfinding algorithm");
         while(!exit_con){
             if(first_node){
                 first_node = false;
@@ -2787,7 +2791,7 @@ class DvgSlam : public rclcpp::Node{
                 continue;
             }
             if(current_slot->key.x == goal_x && current_slot->key.y == goal_y && current_slot->key.z == goal_z){
-                RCLCPP_INFO(this->get_logger(), "goal point found!");
+                RCLCPP_INFO(self->get_logger(), "goal point found!");
                 exit_con = true;
                 continue;
             }
@@ -2796,8 +2800,9 @@ class DvgSlam : public rclcpp::Node{
                 for(int64_t y = current_slot->key.y - 1; y <= current_slot->key.y + 1; y++){
                     for(int64_t z = current_slot->key.z - 1; z <= current_slot->key.z + 1; z++){
                         if(!(x == current_slot->key.x && y == current_slot->key.y && z == current_slot->key.z) && 
-                            !voxel_graph_lookup_inflation(graph, x, y, z)){
+                            !voxel_graph_lookup_inflation(self->graph, x, y, z)){
                             PointSlot_t* next_point = voxel_hash_map_insert(nodes, x, y, z);
+                            next_point->astar_heuristic = self->get_euclidean_dist(next_point->key.x, next_point->key.y, next_point->key.z, goal_x, goal_y, goal_z);
                             current_slot = voxel_hash_map_lookup(nodes, current_key.x, current_key.y, current_key.z);
                             int8_t dimension_diff = 0;
                             if(x != current_slot->key.x) dimension_diff++;
@@ -2822,7 +2827,7 @@ class DvgSlam : public rclcpp::Node{
             }
         }
         std::vector<Point_t> path;
-        RCLCPP_INFO(this->get_logger(), "assembling path");
+        RCLCPP_INFO(self->get_logger(), "assembling path");
         PointSlot_t* node = voxel_hash_map_lookup(nodes, goal_x, goal_y, goal_z);
         while(node != NULL && node->has_prev){
             path.push_back(node->key);
@@ -2830,20 +2835,20 @@ class DvgSlam : public rclcpp::Node{
         }
         std::reverse(path.begin(), path.end());
         nav_msgs::msg::Path path_msg;
-        path_msg.header.stamp = this->get_clock()->now();
+        path_msg.header.stamp = self->get_clock()->now();
         path_msg.header.frame_id = "odom";
 
         path_msg.poses.reserve(path.size());
         for(const auto& voxel : path){
             geometry_msgs::msg::PoseStamped pose;
             pose.header = path_msg.header;
-            pose.pose.position.x = static_cast<double>(voxel.x) / scalar;
-            pose.pose.position.y = static_cast<double>(voxel.y) / scalar;
-            pose.pose.position.z = static_cast<double>(voxel.z) / scalar;
+            pose.pose.position.x = static_cast<double>(voxel.x) / self->scalar;
+            pose.pose.position.y = static_cast<double>(voxel.y) / self->scalar;
+            pose.pose.position.z = static_cast<double>(voxel.z) / self->scalar;
             pose.pose.orientation.w = 1.0;
             path_msg.poses.push_back(pose);
         }
-        path_publisher->publish(path_msg);
+        self->path_publisher->publish(path_msg);
         voxel_priority_queue_free(prio_queue);
         voxel_hash_map_free(nodes);
     }
