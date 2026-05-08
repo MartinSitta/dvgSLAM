@@ -145,9 +145,10 @@ static inline void resize(VoxelHashMap_t* hashmap){
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
-        hashmap->slots[cnt].astar_heuristic = 0;
+        hashmap->slots[cnt].astar_heuristic = 0.0f;
         hashmap->slots[cnt].prev_point = NULL;
         hashmap->slots[cnt].visited = false;
+        hashmap->slots[cnt].inserted_into_prio_queue = false;
     }
     for(uint64_t cnt = 0; cnt < old_capacity; cnt++){
         int64_t x = old_array[cnt].key.x;
@@ -160,6 +161,7 @@ static inline void resize(VoxelHashMap_t* hashmap){
             new_slot->traveled_dist = old_array[cnt].traveled_dist;
             new_slot->prev_point = old_array[cnt].prev_point;
             new_slot->visited = old_array[cnt].visited;
+            new_slot->inserted_into_prio_queue = old_array[cnt].inserted_into_prio_queue;
         }
     }
     free(old_array);
@@ -182,6 +184,7 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
         hashmap->slots[cnt].astar_heuristic = 0.0f;
         hashmap->slots[cnt].prev_point = NULL;
+        hashmap->slots[cnt].inserted_into_prio_queue = false;
     }
     return hashmap;
 }

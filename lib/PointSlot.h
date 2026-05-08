@@ -27,6 +27,7 @@ typedef struct PointSlot_t{
     float traveled_dist;
     PointSlot_t* prev_point;
     bool visited;
+    bool inserted_into_prio_queue;
 }PointSlot_t;
 
 #ifdef __cplusplus

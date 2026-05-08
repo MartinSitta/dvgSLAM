@@ -15,6 +15,7 @@
 #include <thread>
 #include <cmath>
 #include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2/convert.h>
@@ -193,6 +194,7 @@ class DvgSlam : public rclcpp::Node{
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         publisher_two = this->create_publisher<nav_msgs::msg::Odometry>("debug_map_pose", 1);
+        path_publisher = this->create_publisher<nav_msgs::msg::Path>("planned_path", 1);
         pose_timer = this->create_wall_timer(
         10ms, std::bind(&DvgSlam::debug_map_pose_callback, this));
         nav_timer = this->create_wall_timer(
@@ -2085,6 +2087,7 @@ class DvgSlam : public rclcpp::Node{
     rclcpp::TimerBase::SharedPtr nav_timer;
     rclcpp::Publisher<mesh_msgs::msg::MeshGeometryStamped>::SharedPtr publisher_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr publisher_two;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_publisher;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subscription_two; 
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_three;
@@ -2731,6 +2734,8 @@ class DvgSlam : public rclcpp::Node{
         io_mutex.unlock();
     }
     void nav_callback(){
+        RCLCPP_INFO(this->get_logger(), "entering the pathfinding function");
+        static const float neighbor_costs[4]{0.0f, 1.0f, 1.41421356f, 1.73205081f};
         int64_t horizontal_clearance = 0.5 * (float) scalar;
         int64_t vertical_clearance = 1.2 * (float) scalar;
         voxel_graph_build_inflation(graph, horizontal_clearance, vertical_clearance);
@@ -2739,15 +2744,25 @@ class DvgSlam : public rclcpp::Node{
         int64_t starting_x = global_point.position.x * (float) scalar;
         int64_t starting_y = global_point.position.y * (float) scalar;
         int64_t starting_z = global_point.position.z * (float) scalar;
-        int64_t goal_x = 0;
-        int64_t goal_y = 0;
-        int64_t goal_z = 0;
+        int64_t goal_x = 2.0f * (float) scalar;
+        int64_t goal_y = 0.0f * (float) scalar;
+        int64_t goal_z = 0.0f * (float) scalar;
+        if(starting_x == goal_x && starting_y == goal_y && starting_z == goal_z){
+            voxel_hash_map_free(nodes);
+            voxel_priority_queue_free(prio_queue);
+            return;
+        }
         starting_z += vertical_clearance / 2 + 1;
+        goal_z += vertical_clearance / 2 + 1;
         if(voxel_graph_lookup_inflation(graph, starting_x, starting_y, starting_z)){
+            return;
+        }
+        if(voxel_graph_lookup_inflation(graph, goal_x, goal_y, goal_z)){
             return;
         }
         bool first_node = true;
         bool exit_con = false;
+        RCLCPP_INFO(this->get_logger(), "starting pathfinding algorithm");
         while(!exit_con){
             if(first_node){
                 first_node = false;
@@ -2755,37 +2770,81 @@ class DvgSlam : public rclcpp::Node{
                 starting_slot->traveled_dist = 0.0f;
                 voxel_priority_queue_enqueue(prio_queue, starting_slot);
             }
+            //RCLCPP_INFO(this->get_logger(), "get hugged");
             PointSlot_t* current_point = voxel_priority_queue_dequeue(prio_queue);
+            //RCLCPP_INFO(this->get_logger(), "idiot");
             if(current_point == NULL){
+                exit_con = true;
+                continue;
+            }
+            if(current_point->visited){
+                continue;
+            }
+            if(current_point->key.x == goal_x && current_point->key.y == goal_y && current_point->key.z == goal_z){
+                RCLCPP_INFO(this->get_logger(), "goal point found!");
                 exit_con = true;
                 continue;
             }
             current_point->visited = true;
             for(int64_t x = current_point->key.x - 1; x <= current_point->key.x + 1; x++){
-                for(int64_t y = current_point->key.y - 1; x <= current_point->key.y + 1; y++){
-                    for(int64_t z = current_point->key.z - 1; x <= current_point->key.z + 1; z++){
-                        if(x != current_point->key.x && y != current_point->key.y && z != current_point->key.z && 
+                for(int64_t y = current_point->key.y - 1; y <= current_point->key.y + 1; y++){
+                    for(int64_t z = current_point->key.z - 1; z <= current_point->key.z + 1; z++){
+                        if(!(x == current_point->key.x && y == current_point->key.y && z == current_point->key.z) && 
                             !voxel_graph_lookup_inflation(graph, x, y, z)){
                             PointSlot_t* next_point = voxel_hash_map_insert(nodes, x, y, z);
-                            float dist_from_current = get_euclidean_dist(x, y, z, current_point->key.x, current_point->key.y, current_point->key.z);
+                            int8_t dimension_diff = 0;
+                            if(x != current_point->key.x) dimension_diff++;
+                            if(y != current_point->key.y) dimension_diff++;
+                            if(z != current_point->key.z) dimension_diff++;
+                            float dist_from_current = neighbor_costs[dimension_diff];
+                            //RCLCPP_INFO(this->get_logger(), "pookiebear");
                             if(current_point->traveled_dist + dist_from_current < next_point->traveled_dist){
                                 next_point->traveled_dist = current_point->traveled_dist + dist_from_current;
                                 next_point->prev_point = current_point;
                             }
-                            if(next_point->key.x == goal_x && next_point->key.y == goal_y && next_point->key.z == goal_z){
-                                exit_con = true;
-                            }
+                            //RCLCPP_INFO(this->get_logger(), "kitten");
                             if(!next_point->visited){
+                                //RCLCPP_INFO(this->get_logger(), "UwU");
                                 voxel_priority_queue_enqueue(prio_queue, next_point);
+                                //RCLCPP_INFO(this->get_logger(), "meow");
                             }
-
                         }
                     }
                 }
             }
         }
+        std::vector<Point_t> path;
+        PointSlot_t* node = voxel_hash_map_lookup(nodes, goal_x, goal_y, goal_z);
+        RCLCPP_INFO(this->get_logger(), "assembling path");
+        if(node == NULL || node->prev_point == NULL){
+            RCLCPP_WARN(this->get_logger(), "no path found!");
+            voxel_priority_queue_free(prio_queue);
+            voxel_hash_map_free(nodes);
+            return;
+        }
+        while(node != NULL){
+            path.push_back(node->key);
+            node = node->prev_point;
 
+        }
+        std::reverse(path.begin(), path.end());
+        nav_msgs::msg::Path path_msg;
+        path_msg.header.stamp = this->get_clock()->now();
+        path_msg.header.frame_id = "odom";
 
+        path_msg.poses.reserve(path.size());
+        for(const auto& voxel : path){
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header = path_msg.header;
+            pose.pose.position.x = static_cast<double>(voxel.x) / scalar;
+            pose.pose.position.y = static_cast<double>(voxel.y) / scalar;
+            pose.pose.position.z = static_cast<double>(voxel.z) / scalar;
+            pose.pose.orientation.w = 1.0;
+            path_msg.poses.push_back(pose);
+        }
+        path_publisher->publish(path_msg);
+        voxel_priority_queue_free(prio_queue);
+        voxel_hash_map_free(nodes);
     }
 };
 

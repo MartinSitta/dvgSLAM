@@ -29,7 +29,7 @@ static inline void heapify_down(PointSlot_t** heap, int64_t index, int64_t capac
         heap[smallest_index]->astar_heuristic + heap[smallest_index]->traveled_dist){
         smallest_index = right_sub_tree;
     }
-    if(smallest_index == root){
+    if(smallest_index != root){
         swap(heap, root, smallest_index);
         heapify_down(heap, smallest_index, capacity);
     }
@@ -75,21 +75,27 @@ void voxel_priority_queue_free(VoxelPriorityQueue_t* queue){
 }
 
 void voxel_priority_queue_enqueue(VoxelPriorityQueue_t* queue, PointSlot_t* slot){
+    assert(slot != NULL);
+    if(slot->inserted_into_prio_queue){
+        return;
+    }
     if(queue->current_element >= queue->capacity){
         resize(queue);
-        return;
-        //TODO: IMPLEMENT A ARRAY RESIZE OPERATION!
     }
     queue->array[queue->current_element] = slot;
     heapify_up(queue->array, queue->current_element);
+    slot->inserted_into_prio_queue = true;
     queue->current_element++;
 }
 PointSlot_t* voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue){
+    if(queue->current_element == 0){
+        return NULL;
+    }
     PointSlot_t* output = queue->array[0];
-    queue->array[0] = queue->array[queue->current_element];
-    queue->array[queue->current_element] = NULL;
     queue->current_element--;
-    heapify_down(queue->array, 0, queue->capacity);
+    queue->array[0] = queue->array[queue->current_element];
+    queue->array[queue->current_element ] = NULL;
+    heapify_down(queue->array, 0, queue->current_element);
     return output;
 }
 PointSlot_t* voxel_priority_queue_peek(VoxelPriorityQueue_t* queue){
