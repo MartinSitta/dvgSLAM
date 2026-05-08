@@ -120,8 +120,6 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
                 default:
                     break;
                 }
-
-                hashmap->occupied_slot_count++;
                 return probe_slot;
             }
         }
@@ -272,6 +270,9 @@ PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         return NULL;
     }
     if(point_equals(&initial_slot->key, x, y, z)){
+        if(initial_slot->state == SLOT_TOMBSTONE){
+            return NULL;
+        }
         return initial_slot;
     }
     else{
@@ -283,6 +284,9 @@ PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y
                 return NULL;
             }
             if(point_equals(&probe_slot->key, x, y, z)){
+                if(probe_slot->state == SLOT_TOMBSTONE){
+                    return NULL;
+                }
                 return probe_slot;
             }
         }

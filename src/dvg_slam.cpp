@@ -2771,12 +2771,13 @@ class DvgSlam : public rclcpp::Node{
                 voxel_priority_queue_enqueue(prio_queue, starting_slot->key, nodes);
             }
             //RCLCPP_INFO(this->get_logger(), "get hugged");
-            Point_t* current_key = voxel_priority_queue_dequeue(prio_queue, nodes);
+            Point_t* ptr = voxel_priority_queue_dequeue(prio_queue, nodes);
             //RCLCPP_INFO(this->get_logger(), "idiot");
-            if(current_key == NULL){
+            if(ptr == NULL){
                 break;
             }
-            PointSlot_t* current_slot = voxel_hash_map_lookup(nodes, current_key->x, current_key->y, current_key->z);
+            Point_t current_key = *ptr;
+            PointSlot_t* current_slot = voxel_hash_map_lookup(nodes, current_key.x, current_key.y, current_key.z);
             if(current_slot->visited){
                 continue;
             }

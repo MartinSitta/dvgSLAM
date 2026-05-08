@@ -26,6 +26,7 @@ VoxelGraph_t* voxel_graph_init(uint32_t chunk_count){
     uint32_t chunk_hash_table_size = chunk_count * 2;
     VoxelGraph_t* output = malloc(sizeof(VoxelGraph_t));
     output->chunk_amount = chunk_count;
+    output->current_chunk_index = 0;
     output->total_hash_table_insertions = 0;
     output->total_hash_collisions = 0;
     if(((chunk_hash_table_size) & (chunk_hash_table_size - 1)) != 0){

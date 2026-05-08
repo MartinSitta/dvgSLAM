@@ -8,10 +8,10 @@ static inline float get_cost(VoxelHashMap_t* nodes, Point_t* key){
     if(slot == NULL) return 999999999.0f;
     return slot->traveled_dist + slot->astar_heuristic;
 }
-static inline void swap(PointSlot_t** min_heap, int64_t index_1, int64_t index_2){
-    PointSlot_t* temp_ptr = min_heap[index_2];
-    min_heap[index_2] = min_heap[index_1];
-    min_heap[index_1] = temp_ptr;
+static inline void swap(Point_t* heap, int64_t index_1, int64_t index_2){
+    Point_t temp = heap[index_2];
+    heap[index_2] = heap[index_1];
+    heap[index_1] = temp;
 }
 static inline void heapify_up(Point_t* heap, int64_t index, VoxelHashMap_t* nodes){
     if(index && get_cost(nodes, &heap[(index-1)/2]) > get_cost(nodes, &heap[index])){
@@ -92,14 +92,14 @@ void voxel_priority_queue_enqueue(VoxelPriorityQueue_t* queue,
 Point_t* voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue,
                                        VoxelHashMap_t* nodes){
     if(queue->current_element == 0) return NULL;
-    Point_t* output_key = &queue->array[0]; // return pointer to key in queue
-    PointSlot_t* slot = voxel_hash_map_lookup(nodes, output_key->x, 
-                                               output_key->y, output_key->z);
+    Point_t output_key = queue->array[0]; // return pointer to key in queue
+    PointSlot_t* slot = voxel_hash_map_lookup(nodes, output_key.x, 
+                                               output_key.y, output_key.z);
     if(slot) slot->inserted_into_prio_queue = false;
     queue->current_element--;
     queue->array[0] = queue->array[queue->current_element];
     heapify_down(queue->array, 0, queue->current_element, nodes);
-    return output_key;
+    return &output_key;
 }
 Point_t* voxel_priority_queue_peek(VoxelPriorityQueue_t* queue){
     return &queue->array[0];
