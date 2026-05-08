@@ -64,7 +64,7 @@ VoxelPriorityQueue_t* voxel_priority_queue_init(int64_t capacity){
         return NULL;
     }
     for(int64_t cnt = 0; cnt < capacity; cnt++){
-
+        output->array[cnt] = NULL;
     }
     return output;
 }
@@ -92,6 +92,7 @@ PointSlot_t* voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue){
         return NULL;
     }
     PointSlot_t* output = queue->array[0];
+    output->inserted_into_prio_queue = false;
     queue->current_element--;
     queue->array[0] = queue->array[queue->current_element];
     queue->array[queue->current_element ] = NULL;

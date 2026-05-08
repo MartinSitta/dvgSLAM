@@ -91,6 +91,7 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
         case 3:
             hashmap->occupied_slot_count++;
             hashmap->tombstome_count--;
+            break;
         default:
             break;
         }
@@ -115,6 +116,7 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
                 case 3:
                     hashmap->occupied_slot_count++;
                     hashmap->tombstome_count--;
+                    break;
                 default:
                     break;
                 }
@@ -216,6 +218,7 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         case 3:
             hashmap->occupied_slot_count++;
             hashmap->tombstome_count--;
+            break;
         default:
             break;
         }
@@ -240,6 +243,7 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
                 case 3:
                     hashmap->occupied_slot_count++;
                     hashmap->tombstome_count--;
+                    break;
                 default:
                     break;
                 }
@@ -250,7 +254,7 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         }
     }
     resize(hashmap); // this part of the code only triggers when the probe chain length is longer than 10
-    voxel_hash_map_insert(hashmap, x, y, z);//IE. more than 10 hash collisions have occured in one lookup
+    return voxel_hash_map_insert(hashmap, x, y, z);//IE. more than 10 hash collisions have occured in one lookup
     
 }
 PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z){
