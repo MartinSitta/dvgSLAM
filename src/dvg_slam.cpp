@@ -2768,44 +2768,45 @@ class DvgSlam : public rclcpp::Node{
                 first_node = false;
                 PointSlot_t* starting_slot = voxel_hash_map_insert(nodes, starting_x, starting_y, starting_z);
                 starting_slot->traveled_dist = 0.0f;
-                voxel_priority_queue_enqueue(prio_queue, starting_slot);
+                voxel_priority_queue_enqueue(prio_queue, starting_slot->key, nodes);
             }
             //RCLCPP_INFO(this->get_logger(), "get hugged");
-            PointSlot_t* current_point = voxel_priority_queue_dequeue(prio_queue);
+            Point_t* current_key = voxel_priority_queue_dequeue(prio_queue, nodes);
             //RCLCPP_INFO(this->get_logger(), "idiot");
-            if(current_point == NULL){
-                exit_con = true;
+            if(current_key == NULL){
+                break;
+            }
+            PointSlot_t* current_slot = voxel_hash_map_lookup(nodes, current_key->x, current_key->y, current_key->z);
+            if(current_slot->visited){
                 continue;
             }
-            if(current_point->visited){
-                continue;
-            }
-            if(current_point->key.x == goal_x && current_point->key.y == goal_y && current_point->key.z == goal_z){
+            if(current_slot->key.x == goal_x && current_slot->key.y == goal_y && current_slot->key.z == goal_z){
                 RCLCPP_INFO(this->get_logger(), "goal point found!");
                 exit_con = true;
                 continue;
             }
-            current_point->visited = true;
-            for(int64_t x = current_point->key.x - 1; x <= current_point->key.x + 1; x++){
-                for(int64_t y = current_point->key.y - 1; y <= current_point->key.y + 1; y++){
-                    for(int64_t z = current_point->key.z - 1; z <= current_point->key.z + 1; z++){
-                        if(!(x == current_point->key.x && y == current_point->key.y && z == current_point->key.z) && 
+            current_slot->visited = true;
+            for(int64_t x = current_slot->key.x - 1; x <= current_slot->key.x + 1; x++){
+                for(int64_t y = current_slot->key.y - 1; y <= current_slot->key.y + 1; y++){
+                    for(int64_t z = current_slot->key.z - 1; z <= current_slot->key.z + 1; z++){
+                        if(!(x == current_slot->key.x && y == current_slot->key.y && z == current_slot->key.z) && 
                             !voxel_graph_lookup_inflation(graph, x, y, z)){
                             PointSlot_t* next_point = voxel_hash_map_insert(nodes, x, y, z);
                             int8_t dimension_diff = 0;
-                            if(x != current_point->key.x) dimension_diff++;
-                            if(y != current_point->key.y) dimension_diff++;
-                            if(z != current_point->key.z) dimension_diff++;
+                            if(x != current_slot->key.x) dimension_diff++;
+                            if(y != current_slot->key.y) dimension_diff++;
+                            if(z != current_slot->key.z) dimension_diff++;
                             float dist_from_current = neighbor_costs[dimension_diff];
                             //RCLCPP_INFO(this->get_logger(), "pookiebear");
-                            if(current_point->traveled_dist + dist_from_current < next_point->traveled_dist){
-                                next_point->traveled_dist = current_point->traveled_dist + dist_from_current;
-                                next_point->prev_point = current_point;
+                            if(current_slot->traveled_dist + dist_from_current < next_point->traveled_dist){
+                                next_point->traveled_dist = current_slot->traveled_dist + dist_from_current;
+                                next_point->prev_key = current_slot->key;
+                                next_point->has_prev = true;
                             }
                             //RCLCPP_INFO(this->get_logger(), "kitten");
                             if(!next_point->visited){
                                 //RCLCPP_INFO(this->get_logger(), "UwU");
-                                voxel_priority_queue_enqueue(prio_queue, next_point);
+                                voxel_priority_queue_enqueue(prio_queue, next_point->key, nodes);
                                 //RCLCPP_INFO(this->get_logger(), "meow");
                             }
                         }
@@ -2814,18 +2815,11 @@ class DvgSlam : public rclcpp::Node{
             }
         }
         std::vector<Point_t> path;
-        PointSlot_t* node = voxel_hash_map_lookup(nodes, goal_x, goal_y, goal_z);
         RCLCPP_INFO(this->get_logger(), "assembling path");
-        if(node == NULL || node->prev_point == NULL){
-            RCLCPP_WARN(this->get_logger(), "no path found!");
-            voxel_priority_queue_free(prio_queue);
-            voxel_hash_map_free(nodes);
-            return;
-        }
-        while(node != NULL){
+        PointSlot_t* node = voxel_hash_map_lookup(nodes, goal_x, goal_y, goal_z);
+        while(node != NULL && node->has_prev){
             path.push_back(node->key);
-            node = node->prev_point;
-
+            node = voxel_hash_map_lookup(nodes, node->prev_key.x, node->prev_key.y, node->prev_key.z);
         }
         std::reverse(path.begin(), path.end());
         nav_msgs::msg::Path path_msg;

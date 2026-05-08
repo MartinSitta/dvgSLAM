@@ -1,48 +1,50 @@
 #include "VoxelPriorityQueue.h"
+#include "VoxelHashMap.h"
 //NOTE: THE IMPLEMENTATION IS PRETTY SIMILAR TO THE IMPLEMENTATION OF GEEKSFORGEEKS
 //KEY DIFFERENCE IS I PLAN TO RESIZE THE ARRAY AS I GO
 //helpers
+static inline float get_cost(VoxelHashMap_t* nodes, Point_t* key){
+    PointSlot_t* slot = voxel_hash_map_lookup(nodes, key->x, key->y, key->z);
+    if(slot == NULL) return 999999999.0f;
+    return slot->traveled_dist + slot->astar_heuristic;
+}
 static inline void swap(PointSlot_t** min_heap, int64_t index_1, int64_t index_2){
     PointSlot_t* temp_ptr = min_heap[index_2];
     min_heap[index_2] = min_heap[index_1];
     min_heap[index_1] = temp_ptr;
 }
-static inline void heapify_up(PointSlot_t** heap, int64_t index){
-    if(index && heap[(index - 1) / 2]->astar_heuristic + heap[(index -1) / 2]->traveled_dist >
-        heap[index]->astar_heuristic + heap[index]->traveled_dist){
-        swap(heap, (index - 1) / 2, index);
-        heapify_up(heap, (index - 1) / 2);
+static inline void heapify_up(Point_t* heap, int64_t index, VoxelHashMap_t* nodes){
+    if(index && get_cost(nodes, &heap[(index-1)/2]) > get_cost(nodes, &heap[index])){
+        swap(heap, (index-1)/2, index);
+        heapify_up(heap, (index-1)/2, nodes);
     }
 }
-static inline void heapify_down(PointSlot_t** heap, int64_t index, int64_t capacity){
-    int64_t root = index;
-    int64_t left_sub_tree = 2 * index + 1;
-    int64_t right_sub_tree = 2 * index + 2;
-    int64_t smallest_index = index;
-    if(left_sub_tree < capacity &&
-        heap[left_sub_tree]->astar_heuristic + heap[left_sub_tree]->traveled_dist <
-        heap[smallest_index]->astar_heuristic + heap[smallest_index]->traveled_dist){
-        smallest_index = left_sub_tree;
+static inline void heapify_down(Point_t* heap, int64_t index, 
+                                int64_t capacity, VoxelHashMap_t* nodes){
+    int64_t smallest = index;
+    int64_t left  = 2*index+1;
+    int64_t right = 2*index+2;
+    if(left  < capacity && get_cost(nodes, &heap[left])  < get_cost(nodes, &heap[smallest])){
+        smallest = left;
     }
-    if(right_sub_tree < capacity &&
-        heap[right_sub_tree]->astar_heuristic + heap[right_sub_tree]->traveled_dist <
-        heap[smallest_index]->astar_heuristic + heap[smallest_index]->traveled_dist){
-        smallest_index = right_sub_tree;
+    if(right < capacity && get_cost(nodes, &heap[right]) < get_cost(nodes, &heap[smallest])){
+        smallest = right;
     }
-    if(smallest_index != root){
-        swap(heap, root, smallest_index);
-        heapify_down(heap, smallest_index, capacity);
+    if(smallest != index){
+        swap(heap, index, smallest);
+        heapify_down(heap, smallest, capacity, nodes);
     }
-
 }
 
 void resize(VoxelPriorityQueue_t* queue){
-    PointSlot_t** new_array = malloc(sizeof(PointSlot_t*) * queue->capacity * 2);
+    Point_t* new_array = malloc(sizeof(Point_t) * queue->capacity * 2);
     for(int64_t cnt = 0; cnt < queue->capacity; cnt++){
         new_array[cnt] = queue->array[cnt];
     }
     for(int64_t cnt = queue->capacity; cnt < queue->capacity * 2; cnt++){
-        new_array[cnt] = NULL;
+        new_array[cnt].x = 0;
+        new_array[cnt].y = 0;
+        new_array[cnt].z = 0;
     }
     queue->capacity = queue->capacity * 2;
     PointSlot_t** old_array = queue->array;
@@ -59,12 +61,14 @@ VoxelPriorityQueue_t* voxel_priority_queue_init(int64_t capacity){
     VoxelPriorityQueue_t* output = malloc(sizeof(VoxelPriorityQueue_t));
     output->capacity = capacity;
     output->current_element = 0;
-    output->array = malloc(sizeof(PointSlot_t*) * output->capacity);
+    output->array = malloc(sizeof(Point_t) * output->capacity);
     if(output->array == NULL){
         return NULL;
     }
     for(int64_t cnt = 0; cnt < capacity; cnt++){
-        output->array[cnt] = NULL;
+        output->array[cnt].x = 0;
+        output->array[cnt].y = 0;
+        output->array[cnt].z = 0;
     }
     return output;
 }
@@ -74,31 +78,29 @@ void voxel_priority_queue_free(VoxelPriorityQueue_t* queue){
     free(queue);
 }
 
-void voxel_priority_queue_enqueue(VoxelPriorityQueue_t* queue, PointSlot_t* slot){
-    assert(slot != NULL);
-    if(slot->inserted_into_prio_queue){
-        return;
-    }
-    if(queue->current_element >= queue->capacity){
-        resize(queue);
-    }
-    queue->array[queue->current_element] = slot;
-    heapify_up(queue->array, queue->current_element);
+void voxel_priority_queue_enqueue(VoxelPriorityQueue_t* queue, 
+                                    Point_t key,
+                                    VoxelHashMap_t* nodes){
+    PointSlot_t* slot = voxel_hash_map_lookup(nodes, key.x, key.y, key.z);
+    if(slot == NULL || slot->inserted_into_prio_queue) return;
+    if(queue->current_element >= queue->capacity) resize(queue);
+    queue->array[queue->current_element] = key;
+    heapify_up(queue->array, queue->current_element, nodes);
     slot->inserted_into_prio_queue = true;
     queue->current_element++;
 }
-PointSlot_t* voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue){
-    if(queue->current_element == 0){
-        return NULL;
-    }
-    PointSlot_t* output = queue->array[0];
-    output->inserted_into_prio_queue = false;
+Point_t* voxel_priority_queue_dequeue(VoxelPriorityQueue_t* queue,
+                                       VoxelHashMap_t* nodes){
+    if(queue->current_element == 0) return NULL;
+    Point_t* output_key = &queue->array[0]; // return pointer to key in queue
+    PointSlot_t* slot = voxel_hash_map_lookup(nodes, output_key->x, 
+                                               output_key->y, output_key->z);
+    if(slot) slot->inserted_into_prio_queue = false;
     queue->current_element--;
     queue->array[0] = queue->array[queue->current_element];
-    queue->array[queue->current_element ] = NULL;
-    heapify_down(queue->array, 0, queue->current_element);
-    return output;
+    heapify_down(queue->array, 0, queue->current_element, nodes);
+    return output_key;
 }
-PointSlot_t* voxel_priority_queue_peek(VoxelPriorityQueue_t* queue){
-    return queue->array[0];
+Point_t* voxel_priority_queue_peek(VoxelPriorityQueue_t* queue){
+    return &queue->array[0];
 }

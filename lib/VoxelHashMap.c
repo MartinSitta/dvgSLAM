@@ -144,11 +144,14 @@ static inline void resize(VoxelHashMap_t* hashmap){
         hashmap->slots[cnt].key.x = 0;
         hashmap->slots[cnt].key.y = 0;
         hashmap->slots[cnt].key.z = 0;
+        hashmap->slots[cnt].prev_key.x = 0;
+        hashmap->slots[cnt].prev_key.y = 0;
+        hashmap->slots[cnt].prev_key.z = 0;
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
         hashmap->slots[cnt].astar_heuristic = 0.0f;
-        hashmap->slots[cnt].prev_point = NULL;
+        hashmap->slots[cnt].has_prev = 0;
         hashmap->slots[cnt].visited = false;
         hashmap->slots[cnt].inserted_into_prio_queue = false;
     }
@@ -159,9 +162,10 @@ static inline void resize(VoxelHashMap_t* hashmap){
         uint64_t hash = old_array[cnt].raw_hash;
         if(old_array[cnt].state == SLOT_OCCUPIED){
             PointSlot_t* new_slot = voxel_hash_map_insert_with_known_hash(hashmap, x, y, z, hash);
+            new_slot->prev_key = old_array[cnt].prev_key;
             new_slot->astar_heuristic = old_array[cnt].astar_heuristic;
             new_slot->traveled_dist = old_array[cnt].traveled_dist;
-            new_slot->prev_point = old_array[cnt].prev_point;
+            new_slot->has_prev = old_array[cnt].has_prev;
             new_slot->visited = old_array[cnt].visited;
             new_slot->inserted_into_prio_queue = old_array[cnt].inserted_into_prio_queue;
         }
@@ -181,12 +185,15 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
         hashmap->slots[cnt].key.x = 0;
         hashmap->slots[cnt].key.y = 0;
         hashmap->slots[cnt].key.z = 0;
+        hashmap->slots[cnt].prev_key.x = 0;
+        hashmap->slots[cnt].prev_key.y = 0;
+        hashmap->slots[cnt].prev_key.z = 0;
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
         hashmap->slots[cnt].astar_heuristic = 0.0f;
-        hashmap->slots[cnt].prev_point = NULL;
         hashmap->slots[cnt].inserted_into_prio_queue = false;
+        hashmap->slots[cnt].has_prev = 0;
     }
     return hashmap;
 }
