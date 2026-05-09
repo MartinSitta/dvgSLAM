@@ -98,7 +98,7 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
         return initial_slot;
     }
     else{
-        uint64_t raw_double_hash = build_hash_map_hash(x, y, z, hash);//fibonacci_doublehash(hash);
+        uint64_t raw_double_hash = build_hash_map_double_hash(hash, hashmap->hash_seed);//fibonacci_doublehash(hash);
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
@@ -128,7 +128,9 @@ static inline PointSlot_t* voxel_hash_map_insert_with_known_hash(VoxelHashMap_t*
 }
 
 static inline void resize(VoxelHashMap_t* hashmap){
-    PointSlot_t* new_array = malloc(sizeof(PointSlot_t) * (hashmap->capacity << 1));
+    uint64_t new_capacity = hashmap->capacity << 1;
+retry:
+    PointSlot_t* new_array = malloc(sizeof(PointSlot_t) * new_capacity);
     assert(new_array != NULL);
     if(new_array == NULL){
         return;
@@ -160,7 +162,13 @@ static inline void resize(VoxelHashMap_t* hashmap){
         uint64_t hash = old_array[cnt].raw_hash;
         if(old_array[cnt].state == SLOT_OCCUPIED){
             PointSlot_t* new_slot = voxel_hash_map_insert_with_known_hash(hashmap, x, y, z, hash);
-            assert(new_slot != NULL);
+            if(new_slot == NULL){
+                free(new_array);
+                hashmap->slots = old_array;
+                hashmap->capacity = old_capacity;
+                new_capacity = new_capacity << 1;
+                goto retry;
+            }
             new_slot->prev_key = old_array[cnt].prev_key;
             new_slot->astar_heuristic = old_array[cnt].astar_heuristic;
             new_slot->traveled_dist = old_array[cnt].traveled_dist;
@@ -179,7 +187,6 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
     hashmap->tombstome_count = 0;
     hashmap->capacity = get_next_pow_of_2(initial_capacity);
     hashmap->slots = malloc(sizeof(PointSlot_t) * hashmap->capacity);
-    srand(time(NULL));
     hashmap->hash_seed = rand();
     for(int64_t cnt = 0; cnt < hashmap->capacity; cnt++){
         hashmap->slots[cnt].key.x = 0;
@@ -234,7 +241,7 @@ PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y
             return initial_slot;
         }
         else{
-            uint64_t raw_double_hash = build_hash_map_hash(x, y, z, hash);//fibonacci_doublehash(hash);
+            uint64_t raw_double_hash = build_hash_map_double_hash(hash, hashmap->hash_seed);//fibonacci_doublehash(hash);
             for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
                 uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
                 PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
@@ -280,7 +287,7 @@ PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y
         return initial_slot;
     }
     else{
-        uint64_t raw_double_hash = build_hash_map_hash(x, y, z, hash);//fibonacci_doublehash(hash);
+        uint64_t raw_double_hash = build_hash_map_double_hash(hash, hashmap->hash_seed);//fibonacci_doublehash(hash);
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
@@ -311,7 +318,7 @@ bool voxel_hash_map_remove(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_
         return true;
     }
     else{
-        uint64_t raw_double_hash = build_hash_map_hash(x, y, z, hash);//fibonacci_doublehash(hash);
+        uint64_t raw_double_hash = build_hash_map_double_hash(hash, hashmap->hash_seed);//fibonacci_doublehash(hash);
         for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
             uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
             PointSlot_t* probe_slot = get_slot(hashmap, double_hash);

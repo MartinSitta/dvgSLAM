@@ -2277,7 +2277,7 @@ class DvgSlam : public rclcpp::Node{
         dynamic_map_entry_cap = dynamic_map_entry_cap * 0.7;
         const auto pc_start = std::chrono::steady_clock::now();
         int64_t sample_ratio = 20;
-        VoxelHashMap_t* hashmap = voxel_hash_map_init(16000, 10, 0.5f);
+        VoxelHashMap_t* hashmap = voxel_hash_map_init(16000, 64, 0.5f);
         for(const auto &p : transformed_cloud->points){
             int64_t x_point = p.x;
             int64_t y_point = p.y;
@@ -2752,7 +2752,7 @@ class DvgSlam : public rclcpp::Node{
         int64_t horizontal_clearance = 0.5 * (float) self->scalar;
         int64_t vertical_clearance = 1.2 * (float) self->scalar;
         voxel_graph_build_inflation(self->graph, horizontal_clearance, vertical_clearance);
-        VoxelHashMap_t* nodes = voxel_hash_map_init(1<<17, 10, 0.5);
+        VoxelHashMap_t* nodes = voxel_hash_map_init(1<<17, 64, 0.5);
         VoxelPriorityQueue_t* prio_queue = voxel_priority_queue_init(1<<17);
         int64_t starting_x = self->global_point.position.x * (float) self->scalar;
         int64_t starting_y = self->global_point.position.y * (float) self->scalar;
