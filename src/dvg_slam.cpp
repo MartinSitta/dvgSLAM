@@ -2733,11 +2733,20 @@ class DvgSlam : public rclcpp::Node{
         RCLCPP_INFO(this->get_logger(), "entering the octomap took %ld ms", diff.count());
         io_mutex.unlock();
     }
+    std::mutex nav_mutex;
     void nav_callback(){
-        std::thread t1(DvgSlam::do_astar_pathfinding, this);
-        t1.detach();
+        //std::thread t1(DvgSlam::do_astar_pathfinding, this);
+        io_mutex.lock();
+        do_astar_pathfinding(this);
+        io_mutex.unlock();
+        //t1.detach();
+        
     }
     static void do_astar_pathfinding(DvgSlam* self){
+        bool mutex_state = self->nav_mutex.try_lock();
+        if(!mutex_state){
+            return;
+        }
         RCLCPP_INFO(self->get_logger(), "entering the pathfinding function");
         static const float neighbor_costs[4]{0.0f, 1.0f, 1.41421356f, 1.73205081f};
         int64_t horizontal_clearance = 0.5 * (float) self->scalar;
@@ -2762,11 +2771,13 @@ class DvgSlam : public rclcpp::Node{
         if(voxel_graph_lookup_inflation(self->graph, starting_x, starting_y, starting_z)){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
+            self->nav_mutex.unlock();
             return;
         }
         if(voxel_graph_lookup_inflation(self->graph, goal_x, goal_y, goal_z)){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
+            self->nav_mutex.unlock();
             return;
         }
         bool first_node = true;
@@ -2851,6 +2862,7 @@ class DvgSlam : public rclcpp::Node{
         self->path_publisher->publish(path_msg);
         voxel_priority_queue_free(prio_queue);
         voxel_hash_map_free(nodes);
+        self->nav_mutex.unlock();
     }
 };
 

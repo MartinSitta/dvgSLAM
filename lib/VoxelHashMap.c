@@ -187,6 +187,7 @@ VoxelHashMap_t* voxel_hash_map_init(uint64_t initial_capacity, uint8_t probe_cha
         hashmap->slots[cnt].prev_key.z = 0;
         hashmap->slots[cnt].raw_hash = 0;
         hashmap->slots[cnt].state = SLOT_EMPTY;
+        hashmap->slots[cnt].visited = false;
         hashmap->slots[cnt].traveled_dist = 999999999.0f;
         hashmap->slots[cnt].astar_heuristic = 0.0f;
         hashmap->slots[cnt].has_prev = 0;
@@ -199,65 +200,68 @@ void voxel_hash_map_free(VoxelHashMap_t* hashmap){
     free(hashmap);
 }
 PointSlot_t* voxel_hash_map_insert(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z){
-    assert(hashmap != NULL);
-    int64_t total_slot_count = hashmap->occupied_slot_count + hashmap->tombstome_count;
-    float load_factor = (float)total_slot_count / (float)hashmap->capacity;
-    if(load_factor >= hashmap->load_factor_threshold){
-        resize(hashmap);
-    }
-    uint64_t hash = build_fibonacci_hash_from_coords(x, y, z);
-    PointSlot_t* initial_slot = get_slot(hashmap, hash);
-    uint8_t return_code = attempt_insertion(initial_slot, x, y, z);
-    if(return_code){
-        initial_slot->raw_hash = hash;
-        switch (return_code)
-        {
-        case 1:
-            hashmap->occupied_slot_count++;
-            /* code */
-            break;
-        case 2:
-            break;
-        case 3:
-            hashmap->occupied_slot_count++;
-            hashmap->tombstome_count--;
-            break;
-        default:
-            break;
+    int8_t resizes = 0;
+    while(resizes < 5){
+        assert(hashmap != NULL);
+        int64_t total_slot_count = hashmap->occupied_slot_count + hashmap->tombstome_count;
+        float load_factor = (float)total_slot_count / (float)hashmap->capacity;
+        if(load_factor >= hashmap->load_factor_threshold){
+            resize(hashmap);
         }
-        return initial_slot;
-    }
-    else{
-        uint64_t raw_double_hash = fibonacci_doublehash(hash);
-        for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
-            uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
-            PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
-            uint8_t return_code_two = attempt_insertion(probe_slot, x, y, z);
-            if(return_code_two){
-                probe_slot->raw_hash = hash;
-                switch (return_code_two)
-                {
-                case 1:
-                    hashmap->occupied_slot_count++;
-                    /* code */
-                    break;
-                case 2:
-                    break;
-                case 3:
-                    hashmap->occupied_slot_count++;
-                    hashmap->tombstome_count--;
-                    break;
-                default:
-                    break;
-                }
+        uint64_t hash = build_fibonacci_hash_from_coords(x, y, z);
+        PointSlot_t* initial_slot = get_slot(hashmap, hash);
+        uint8_t return_code = attempt_insertion(initial_slot, x, y, z);
+        if(return_code){
+            initial_slot->raw_hash = hash;
+            switch (return_code)
+            {
+            case 1:
+                hashmap->occupied_slot_count++;
+                /* code */
+                break;
+            case 2:
+                break;
+            case 3:
+                hashmap->occupied_slot_count++;
+                hashmap->tombstome_count--;
+                break;
+            default:
+                break;
+            }
+            return initial_slot;
+        }
+        else{
+            uint64_t raw_double_hash = fibonacci_doublehash(hash);
+            for(uint8_t probe_chain_len = 1; probe_chain_len < hashmap->max_probe_chain_len; probe_chain_len++){
+                uint64_t double_hash = hash + (raw_double_hash * probe_chain_len);
+                PointSlot_t* probe_slot = get_slot(hashmap, double_hash);
+                uint8_t return_code_two = attempt_insertion(probe_slot, x, y, z);
+                if(return_code_two){
+                    probe_slot->raw_hash = hash;
+                    switch (return_code_two)
+                    {
+                    case 1:
+                        hashmap->occupied_slot_count++;
+                        /* code */
+                        break;
+                    case 2:
+                        break;
+                    case 3:
+                        hashmap->occupied_slot_count++;
+                        hashmap->tombstome_count--;
+                        break;
+                    default:
+                        break;
+                    }
 
-                return probe_slot;
+                    return probe_slot;
+                }
             }
         }
+        resize(hashmap); // this part of the code only triggers when the probe chain length is longer than 10 
+        resizes++;
     }
-    resize(hashmap); // this part of the code only triggers when the probe chain length is longer than 10
-    return voxel_hash_map_insert(hashmap, x, y, z);//IE. more than 10 hash collisions have occured in one lookup
-    
+    return NULL;
 }
 PointSlot_t* voxel_hash_map_lookup(VoxelHashMap_t* hashmap, int64_t x, int64_t y, int64_t z){
     assert(hashmap != NULL);
