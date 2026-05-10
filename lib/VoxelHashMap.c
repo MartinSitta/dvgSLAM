@@ -137,11 +137,10 @@ retry:
     }
     PointSlot_t* old_array = hashmap->slots;
     uint64_t old_capacity = hashmap->capacity;
-    hashmap->capacity = hashmap->capacity << 1;
     hashmap->tombstome_count = 0;
     hashmap->occupied_slot_count = 0;
     hashmap->slots = new_array;
-    for(uint64_t cnt = 0; cnt < hashmap->capacity; cnt++){
+    for(uint64_t cnt = 0; cnt < new_capacity; cnt++){
         hashmap->slots[cnt].key.x = 0;
         hashmap->slots[cnt].key.y = 0;
         hashmap->slots[cnt].key.z = 0;
@@ -175,6 +174,7 @@ retry:
             new_slot->has_prev = old_array[cnt].has_prev;
             new_slot->visited = old_array[cnt].visited;
         }
+    hashmap->capacity = new_capacity;
     }
     free(old_array);
 }

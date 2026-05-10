@@ -7,7 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-
+find_package(rosidl_default_generators REQUIRED)
 find_package(ament_cmake REQUIRED)                                              
 find_package(rclcpp REQUIRED)                                                   
 find_package(sensor_msgs REQUIRED)                                              
@@ -26,25 +26,30 @@ find_package(tf2_sensor_msgs REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
-
-add_library(lib_map_model lib/Chunk.c lib/GraphNode.c lib/HashUtils.c
+rosidl_generate_interfaces(${PROJECT_NAME}
+    #"msg/PathResponse.msg"
+    "srv/GetPath.srv"
+    DEPENDENCIES nav_msgs std_msgs
+    )
+add_library(lib_map_model STATIC lib/Chunk.c lib/GraphNode.c lib/HashUtils.c
     lib/murmur3.c lib/Vertex.c lib/VoxelGraph.c lib/AltChunk.c
     lib/AltGraphNode.c lib/FibonacciHash.c lib/AltGraphBitMap.c lib/VoxelHashMap.c lib/VoxelPriorityQueue.c)     
-add_executable(dvg_slam src/dvg_slam.cpp)
-target_include_directories(dvg_slam PUBLIC
+add_executable(dvg_slam_node src/dvg_slam.cpp)
+target_include_directories(dvg_slam_node PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
-target_compile_features(dvg_slam PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
+target_compile_features(dvg_slam_node PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
-target_link_libraries(dvg_slam lib_map_model)
-ament_target_dependencies(dvg_slam rclcpp sensor_msgs mesh_msgs nav_msgs
+target_link_libraries(dvg_slam_node lib_map_model)
+ament_target_dependencies(dvg_slam_node rclcpp sensor_msgs mesh_msgs nav_msgs
     tf2_ros tf2 tf2_geometry_msgs geometry_msgs octomap octomap_msgs PCL
     pcl_conversions tf2_sensor_msgs tf2_eigen)
+rosidl_target_interfaces(dvg_slam_node ${PROJECT_NAME} "rosidl_typesupport_cpp")
 install(DIRECTORY
   launch
   DESTINATION share/${PROJECT_NAME}/
 )
-install(TARGETS dvg_slam
+install(TARGETS dvg_slam_node
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

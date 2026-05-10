@@ -7,7 +7,7 @@ def generate_launch_description():
         Node(
             package='dvg_slam',
             namespace='dvg_slam',
-            executable='dvg_slam',
+            executable='dvg_slam_node',
             name='dvg_slam',
             parameters=[{
                 'in_topic': '/Spot/Velodyne_Puck/point_cloud', #input topic of type pointcloud_2
