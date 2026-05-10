@@ -194,12 +194,12 @@ class DvgSlam : public rclcpp::Node{
         tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
         tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
         publisher_two = this->create_publisher<nav_msgs::msg::Odometry>("debug_map_pose", 1);
-        //path_publisher = this->create_publisher<nav_msgs::msg::Path>("planned_path", 1);
+        path_publisher = this->create_publisher<nav_msgs::msg::Path>("planned_path", 1);
         pose_timer = this->create_wall_timer(
         10ms, std::bind(&DvgSlam::debug_map_pose_callback, this));
         //nav_timer = this->create_wall_timer(
         //2000ms, std::bind(&DvgSlam::nav_callback, this));
-        auto service = this->create_service<dvg_slam::srv::GetPath>(
+        service = this->create_service<dvg_slam::srv::GetPath>(
             "get_path", std::bind(DvgSlam::nav_callback, this, std::placeholders::_1,
                     std::placeholders::_2)
         );
@@ -2117,6 +2117,7 @@ class DvgSlam : public rclcpp::Node{
     std::chrono::steady_clock::time_point last_processed_octomap_msg;
     std::chrono::steady_clock::time_point last_processed_pointcloud_msg;
     bool first_call_pc_in = true;
+    rclcpp::Service<dvg_slam::srv::GetPath>::SharedPtr service;
     void point_cloud_in_callback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
     {        
         io_mutex.lock();
@@ -2750,7 +2751,6 @@ class DvgSlam : public rclcpp::Node{
         //do_astar_pathfinding(this);
         //io_mutex.unlock();
         t1.detach();
-        
     }
     static void do_astar_pathfinding(DvgSlam* self, int64_t goal_x, int64_t goal_y, int64_t goal_z, int64_t downsample_factor,
          const std::shared_ptr<dvg_slam::srv::GetPath::Response> response){
@@ -2781,7 +2781,7 @@ class DvgSlam : public rclcpp::Node{
         if(starting_x == goal_x && starting_y == goal_y && starting_z == goal_z){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
-            response->success = false;
+            //response->success = false;
             return;
         }
         
@@ -2789,14 +2789,14 @@ class DvgSlam : public rclcpp::Node{
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
             self->nav_mutex.unlock();
-            response->success = false;
+            //response->success = false;
             return;
         }
         if(voxel_graph_lookup_inflation(self->graph, goal_x, goal_y, goal_z)){
             voxel_hash_map_free(nodes);
             voxel_priority_queue_free(prio_queue);
             self->nav_mutex.unlock();
-            response->success = false;
+            //response->success = false;
             return;
         }
         bool first_node = true;
@@ -2869,10 +2869,10 @@ class DvgSlam : public rclcpp::Node{
             node = voxel_hash_map_lookup(nodes, node->prev_key.x, node->prev_key.y, node->prev_key.z);
         }
         std::reverse(path.begin(), path.end());
+        RCLCPP_INFO(self->get_logger(), "building path message");
         nav_msgs::msg::Path path_msg;
         path_msg.header.stamp = self->get_clock()->now();
         path_msg.header.frame_id = "odom";
-
         path_msg.poses.reserve(path.size());
         for(const auto& voxel : path){
             geometry_msgs::msg::PoseStamped pose;
@@ -2883,9 +2883,11 @@ class DvgSlam : public rclcpp::Node{
             pose.pose.orientation.w = 1.0;
             path_msg.poses.push_back(pose);
         }
-        response->path = path_msg;
-        response->success = path_find_succeeded;
+        RCLCPP_INFO(self->get_logger(), "publishing path on topic");
         self->path_publisher->publish(path_msg);
+        RCLCPP_INFO(self->get_logger(), "writing service response");
+        //response->path = path_msg;
+        //response->success = path_find_succeeded;
         voxel_priority_queue_free(prio_queue);
         voxel_hash_map_free(nodes);
         self->nav_mutex.unlock();

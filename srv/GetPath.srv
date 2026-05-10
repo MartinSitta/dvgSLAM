@@ -3,5 +3,3 @@ float32 y
 float32 z
 int64 downsample_factor
 ---
-bool success
-nav_msgs/Path path
