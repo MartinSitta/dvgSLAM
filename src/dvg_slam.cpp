@@ -282,127 +282,114 @@ class DvgSlam : public rclcpp::Node{
     void raycast_delete(int64_t org_x, int64_t org_y, int64_t org_z,
                     int64_t dest_x, int64_t dest_y, int64_t dest_z,
                     bool splash_delete,
-                    double max_range_meters)
-{
-    if(org_x == dest_x && org_y == dest_y && org_z == dest_z) return;
+                    double max_range_meters){
+        if(org_x == dest_x && org_y == dest_y && org_z == dest_z) return;
 
-    DoubleVector_t diff_vect{
-        (double)(dest_x - org_x),
-        (double)(dest_y - org_y),
-        (double)(dest_z - org_z)
-    };
+        DoubleVector_t diff_vect{
+            (double)(dest_x - org_x),
+            (double)(dest_y - org_y),
+            (double)(dest_z - org_z)
+        };
 
-    double len2 = diff_vect.x * diff_vect.x
-                + diff_vect.y * diff_vect.y
-                + diff_vect.z * diff_vect.z;
+        double len2 = diff_vect.x * diff_vect.x
+                    + diff_vect.y * diff_vect.y
+                    + diff_vect.z * diff_vect.z;
 
-    if(len2 < 1.0) return;
+        if(len2 < 1.0) return;
 
-    double ray_len = std::sqrt(len2);
+        double ray_len = std::sqrt(len2);
 
-    // Convert max range from meters to your internal coordinate units.
-    double max_range_units = max_range_meters * (double)scalar;
+        // Convert max range from meters to your internal coordinate units.
+        double max_range_units = max_range_meters * (double)scalar;
 
-    // If the measured endpoint is closer than the clamp, use the real endpoint.
-    // Otherwise only travel up to the clamp.
-    double clamped_ray_len = std::min(ray_len, max_range_units);
+        // If the measured endpoint is closer than the clamp, use the real endpoint.
+        // Otherwise only travel up to the clamp.
+        double clamped_ray_len = std::min(ray_len, max_range_units);
 
-    if(clamped_ray_len < 1.0) return;
+        if(clamped_ray_len < 1.0) return;
 
-    bool endpoint_inside_clamp = ray_len <= max_range_units;
+        bool endpoint_inside_clamp = ray_len <= max_range_units;
 
-    DoubleVector_t normal = double_vect_normalize(diff_vect);
+        DoubleVector_t normal = double_vect_normalize(diff_vect);
 
-    int64_t current_del_count = 0;
-    int64_t max_deletions = std::max<int64_t>(
-    1,
-    (int64_t)((float)scalar * 0.1f)
-    );
-    constexpr double DELETE_NORMAL_DOT_THRESHOLD = -0.2;
-    uint32_t counter = 1;
+        int64_t current_del_count = 0;
+        int64_t max_deletions = std::max<int64_t>(
+        1,
+        (int64_t)((float)scalar * 0.1f)
+        );
+        constexpr double DELETE_NORMAL_DOT_THRESHOLD = -0.2;
+        uint32_t counter = 1;
 
-    uint32_t threshold = 0.15f * (float)scalar;
-    int64_t splash_diameter = (float)scalar * 0.15f;
+        uint32_t threshold = 0.15f * (float)scalar;
+        int64_t splash_radius = std::max<int64_t>(1, (int64_t)((float)scalar * 0.10f));
 
-    if(splash_delete){
-        threshold = splash_diameter + threshold;
-    }
-
-    double threshold2 = (double)threshold * (double)threshold;
-
-    uint32_t max_iter = (uint32_t)std::ceil(clamped_ray_len) + 1;
-
-    int64_t travel_x = std::lround(org_x + normal.x * counter);
-    int64_t travel_y = std::lround(org_y + normal.y * counter);
-    int64_t travel_z = std::lround(org_z + normal.z * counter);
-
-    while(counter < max_iter)
-    {
-        // Only use endpoint threshold if the real endpoint is inside the clamp.
-        // For far-away points, we do not care about the endpoint threshold,
-        // because the ray should stop at max_range_meters instead.
-        if(endpoint_inside_clamp){
-            double dx = (double)(travel_x - dest_x);
-            double dy = (double)(travel_y - dest_y);
-            double dz = (double)(travel_z - dest_z);
-
-            double dist2_to_dest = dx * dx + dy * dy + dz * dz;
-
-            if(dist2_to_dest <= threshold2){
-                return;
-            }
+        if(splash_delete){
+            threshold = splash_radius * 2 + threshold;
         }
 
-        bool point_detected = voxel_graph_lookup(graph, travel_x, travel_y, travel_z);
+        double threshold2 = (double)threshold * (double)threshold;
 
-        if(current_del_count >= max_deletions){
-            return;
-        }
+        uint32_t max_iter = (uint32_t)std::ceil(clamped_ray_len) + 1;
 
-        if(point_detected){
-            DoubleVector_t voxel_normal =
-                build_voxel_local_normal(normal, travel_x, travel_y, travel_z, 6);
+        int64_t travel_x = std::lround(org_x + normal.x * counter);
+        int64_t travel_y = std::lround(org_y + normal.y * counter);
+        int64_t travel_z = std::lround(org_z + normal.z * counter);
 
-            double angle = voxel_normal.x * normal.x
-                         + voxel_normal.y * normal.y
-                         + voxel_normal.z * normal.z;
+        while(counter < max_iter){
+            // Only use endpoint threshold if the real endpoint is inside the clamp.
+            // For far-away points, we do not care about the endpoint threshold,
+            // because the ray should stop at max_range_meters instead.
+            if(endpoint_inside_clamp){
+                double dx = (double)(travel_x - dest_x);
+                double dy = (double)(travel_y - dest_y);
+                double dz = (double)(travel_z - dest_z);
 
-            if(angle <= DELETE_NORMAL_DOT_THRESHOLD){
-                if(splash_delete){
-                    for(int64_t splash_x = travel_x - (splash_diameter / 2);
-                        splash_x <= travel_x + (splash_diameter / 2);
-                        splash_x++)
-                    {
-                        for(int64_t splash_y = travel_y - (splash_diameter / 2);
-                            splash_y <= travel_y + (splash_diameter / 2);
-                            splash_y++)
-                        {
-                            for(int64_t splash_z = travel_z - (splash_diameter / 2);
-                                splash_z <= travel_z + (splash_diameter / 2);
-                                splash_z++)
-                            {
-                                voxel_graph_delete(graph, splash_x, splash_y, splash_z);
-                            }
-                        }
-                    }
+                double dist2_to_dest = dx * dx + dy * dy + dz * dz;
 
+                if(dist2_to_dest <= threshold2){
                     return;
                 }
-                else{
-                    current_del_count++;
-                    voxel_graph_delete(graph, travel_x, travel_y, travel_z);
+            }
+
+            bool point_detected = voxel_graph_lookup(graph, travel_x, travel_y, travel_z);
+
+            if(current_del_count >= max_deletions){
+                return;
+            }
+
+            if(point_detected){
+                DoubleVector_t voxel_normal =
+                    build_voxel_local_normal(normal, travel_x, travel_y, travel_z, 6);
+
+                double angle = voxel_normal.x * normal.x
+                            + voxel_normal.y * normal.y
+                            + voxel_normal.z * normal.z;
+
+                if(angle <= DELETE_NORMAL_DOT_THRESHOLD){
+                    if(splash_delete){
+                        for(int64_t sx = travel_x - splash_radius; sx <= travel_x + splash_radius; sx++){
+                            for(int64_t sy = travel_y - splash_radius; sy <= travel_y + splash_radius; sy++){
+                                for(int64_t sz = travel_z - splash_radius; sz <= travel_z + splash_radius; sz++){
+                                    voxel_graph_delete(graph, sx, sy, sz);
+                                }
+                            }
+                        }
+                        current_del_count++;
+                    }
+                    else{
+                        current_del_count++;
+                        voxel_graph_delete(graph, travel_x, travel_y, travel_z);
+                    }
                 }
             }
+
+            counter++;
+
+            travel_x = std::lround(org_x + normal.x * counter);
+            travel_y = std::lround(org_y + normal.y * counter);
+            travel_z = std::lround(org_z + normal.z * counter);
         }
-
-        counter++;
-
-        travel_x = std::lround(org_x + normal.x * counter);
-        travel_y = std::lround(org_y + normal.y * counter);
-        travel_z = std::lround(org_z + normal.z * counter);
     }
-}
-
     int64_t get_manhattan_dist(int64_t org_x, int64_t org_y, int64_t org_z,
              int64_t dest_x, int64_t dest_y, int64_t dest_z){
         return labs(org_x - dest_x) + labs(org_y - dest_y) + labs(org_z - dest_z);
@@ -2148,6 +2135,7 @@ class DvgSlam : public rclcpp::Node{
         RCLCPP_INFO(this->get_logger(), "generating the mesh took %ld ms", diff.count());
         io_mutex.unlock();
     }
+    bool has_odom = false;
     VoxelGraph_t* graph;
     std::string topic;
     std::string del_topic;
@@ -2260,12 +2248,16 @@ class DvgSlam : public rclcpp::Node{
         pcl::PointCloud<pcl::PointXYZ> map_cloud = get_local_pointcloud(global_point, radius);
         if(map_cloud.empty() || first_call_pc_in){
             first_call_pc_in = false;
+
             for(const auto &p : transformed_cloud->points){
                 int64_t x_point = p.x;
                 int64_t y_point = p.y;
                 int64_t z_point = p.z;
                 voxel_graph_insert(graph, x_point, y_point, z_point);
             }
+
+            last_processed_pointcloud_msg = std::chrono::steady_clock::now();
+
             io_mutex.unlock();
             return;
         }
@@ -2305,55 +2297,54 @@ class DvgSlam : public rclcpp::Node{
             io_mutex.unlock();
             return;
         }
-        pcl::transformPointCloud(*transformed_cloud, *transformed_cloud, corrective_transform);
-        Eigen::Matrix3f rotation = corrective_transform.block<3,3>(0,0);
-        Eigen::Quaternionf q_correction(rotation);
-        q_correction.normalize();
-        Eigen::Vector3f t_correction(
-            corrective_transform(0,3) / (float) scalar,
-            corrective_transform(1,3) / (float) scalar,
-            corrective_transform(2,3) / (float) scalar
-        );
-        Eigen::Vector3f t_old(
-            global_point.position.x,
-            global_point.position.y,
-            global_point.position.z
-        );
-        Eigen::Quaternionf q_current(
-                global_point.orientation.w,
-                global_point.orientation.x,
-                global_point.orientation.y,
-                global_point.orientation.z);
-        Eigen::Vector3f t_new = q_correction * t_old + t_correction;
-        Eigen::Quaternionf q_corrected = (q_correction * q_current).normalized();
-        global_point.orientation.x = q_corrected.x();
-        global_point.orientation.y = q_corrected.y();
-        global_point.orientation.z = q_corrected.z();
-        global_point.orientation.w = q_corrected.w();
-        global_point.position.x = t_new.x();
-        global_point.position.y = t_new.y();
-        global_point.position.z = t_new.z();
-
-        int64_t robot_point_x = global_point.position.x * (float) scalar;
-        int64_t robot_point_y = global_point.position.y * (float) scalar;
-        int64_t robot_point_z = global_point.position.z * (float) scalar;
-        int64_t random_sample_interval = 1000;
-        int64_t current_sample = 0;
-        const auto pose_end = std::chrono::steady_clock::now();
-        auto pose_diff = std::chrono::duration_cast<std::chrono::milliseconds>(pose_end - pose_start);
-        RCLCPP_INFO(this->get_logger(), "pose correction took %d ms", pose_diff.count());
-        last_processed_pointcloud_msg = pose_end;
+        
         float correction_magnitude = corrective_transform.block<3,1>(0,3).norm();
-        RCLCPP_INFO(this->get_logger(), "fitness value is %f", fitness);
-        if(fitness > dynamic_map_entry_cap && correction_magnitude > 1.0f * (float)scalar){
-            RCLCPP_INFO(this->get_logger(), "Map entry not done due to poor fitness");
-            dynamic_map_entry_cap = dynamic_map_entry_cap * 1.05;
+        Eigen::Matrix3f R = corrective_transform.block<3,3>(0,0);
+        Eigen::AngleAxisf angle_axis(R);
+        float rotation_angle = std::abs(angle_axis.angle());
+
+        if(fitness > dynamic_map_entry_cap ||
+        correction_magnitude > 1.0f * (float)scalar ||
+        rotation_angle > 0.35f){
+            RCLCPP_INFO(this->get_logger(), "ICP correction rejected");
+            dynamic_map_entry_cap = dynamic_map_entry_cap * 1.05f;
             io_mutex.unlock();
             return;
         }
         dynamic_map_entry_cap = dynamic_map_entry_cap * 0.7;
+
+
+        // Apply correction to the transformed cloud.
+        // corrective_transform is in scaled map units.
+        pcl::transformPointCloud(*transformed_cloud, *transformed_cloud, corrective_transform);
+
+        // Build correction transform for the robot pose.
+        Eigen::Affine3f T_correction = Eigen::Affine3f::Identity();
+        T_correction.matrix() = corrective_transform;
+
+        // Convert correction translation from scaled map units back to meters.
+        T_correction.translation() /= (float)scalar;
+
+        // Current robot pose in global/map coordinates.
+        Eigen::Affine3f T_global = pose_to_eigen(global_point);
+
+        // Apply ICP correction.
+        // This matches the cloud correction direction: corrected = correction * old.
+        T_global = T_correction * T_global;
+
+        // Write back into global_point.
+        eigen_to_pose(T_global, global_point);
+
+        int64_t robot_point_x = global_point.position.x * (float) scalar;
+        int64_t robot_point_y = global_point.position.y * (float) scalar;
+        int64_t robot_point_z = global_point.position.z * (float) scalar;
+        const auto pose_end = std::chrono::steady_clock::now();
+        auto pose_diff = std::chrono::duration_cast<std::chrono::milliseconds>(pose_end - pose_start);
+        RCLCPP_INFO(this->get_logger(), "pose correction took %d ms", pose_diff.count());
+        last_processed_pointcloud_msg = pose_end;
+
         const auto pc_start = std::chrono::steady_clock::now();
-        int64_t sample_ratio = 20;
+
         VoxelHashMap_t* hashmap = voxel_hash_map_init(16000, 64, 0.5f);
         for(const auto &p : transformed_cloud->points){
             int64_t x_point = p.x;
@@ -2452,66 +2443,68 @@ class DvgSlam : public rclcpp::Node{
         io_mutex.unlock();
         */
     }
-    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg){                                                                           
-        //return;
-        io_mutex.lock();
-        prev_odom_msg_pose = current_odom_msg_pose;
-        current_odom_msg_pose.position = msg->pose.pose.position;
-        current_odom_msg_pose.orientation = msg->pose.pose.orientation;
-        global_point.position.x += current_odom_msg_pose.position.x - prev_odom_msg_pose.position.x;
-        global_point.position.y += current_odom_msg_pose.position.y - prev_odom_msg_pose.position.y;
-        global_point.position.z += current_odom_msg_pose.position.z - prev_odom_msg_pose.position.z;
-        
-        Eigen::Quaternionf q_prev(
-                prev_odom_msg_pose.orientation.w,
-                prev_odom_msg_pose.orientation.x,
-                prev_odom_msg_pose.orientation.y,
-                prev_odom_msg_pose.orientation.z);
-        Eigen::Quaternionf q_current(
-                current_odom_msg_pose.orientation.w,
-                current_odom_msg_pose.orientation.x,
-                current_odom_msg_pose.orientation.y,
-                current_odom_msg_pose.orientation.z);
-        Eigen::Quaternionf q_delta = q_current * q_prev.inverse();
-        q_delta.normalize();
-        Eigen::Quaternionf q_global(
-                global_point.orientation.w,
-                global_point.orientation.x,
-                global_point.orientation.y,
-                global_point.orientation.z);
-        q_global = q_delta * q_global;
-        q_global.normalize();
-        global_point.orientation.x = q_global.x();
-        global_point.orientation.y = q_global.y();
-        global_point.orientation.z = q_global.z();
-        global_point.orientation.w = q_global.w();
 
-        io_mutex.unlock();
-        /*
-        try{
-            transform_stamped = tf_buffer_->lookupTransform(frame_id, "odom", tf2::TimePointZero);
+Eigen::Affine3f pose_to_eigen(const geometry_msgs::msg::Pose& pose)
+{
+    Eigen::Quaternionf q(
+        pose.orientation.w,
+        pose.orientation.x,
+        pose.orientation.y,
+        pose.orientation.z
+    );
+    q.normalize();
 
-            prev_odom_msg_pose.x = current_odom_msg_pose.x;
-            prev_odom_msg_pose.y = current_odom_msg_pose.y;
-            prev_odom_msg_pose.z = current_odom_msg_pose.z;
-            current_odom_msg_pose.x = msg->pose.x;
-            current_odom_msg_pose.y = msg->pose.y;
-            current_odom_msg_pose.z = msg->pose.z;
-            global_point.x = current_odom_msg_pose.x - prev_odom_msg_pose.x;
-            global_point.y = current_odom_msg_pose.y - prev_odom_msg_pose.y;
-            global_point.z = current_odom_msg_pose.z - prev_odom_msg_pose.z;
-            //global_point.x = transform_stamped.transform.translation.x * scalar;
-            //global_point.y = transform_stamped.transform.translation.y * scalar;
-            //global_point.z = transform_stamped.transform.translation.z * scalar;
-            RCLCPP_INFO(this->get_logger(), "Transformed Point: [%f, %f, %f]",
-                     globalPoint.x, globalPoint.y, globalPoint.z);
-        } 
-        */
-        /*
-        catch (tf2::TransformException &ex) {
-            RCLCPP_WARN(this->get_logger(), "Transform error: %s", ex.what());
+    Eigen::Vector3f t(
+        pose.position.x,
+        pose.position.y,
+        pose.position.z
+    );
+
+    return Eigen::Translation3f(t) * q;
+}
+
+    void eigen_to_pose(const Eigen::Affine3f& tf, geometry_msgs::msg::Pose& pose){
+        Eigen::Quaternionf q(tf.rotation());
+        q.normalize();
+
+        pose.position.x = tf.translation().x();
+        pose.position.y = tf.translation().y();
+        pose.position.z = tf.translation().z();
+
+        pose.orientation.x = q.x();
+        pose.orientation.y = q.y();
+        pose.orientation.z = q.z();
+        pose.orientation.w = q.w();
+    }
+
+    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg){
+        std::lock_guard<std::mutex> lock(io_mutex);
+
+        geometry_msgs::msg::Pose incoming_pose = msg->pose.pose;
+
+        if(!has_odom){
+            prev_odom_msg_pose = incoming_pose;
+            current_odom_msg_pose = incoming_pose;
+            has_odom = true;
+            return;
         }
-        */
+
+        prev_odom_msg_pose = current_odom_msg_pose;
+        current_odom_msg_pose = incoming_pose;
+
+        Eigen::Affine3f T_odom_prev = pose_to_eigen(prev_odom_msg_pose);
+        Eigen::Affine3f T_odom_current = pose_to_eigen(current_odom_msg_pose);
+
+        // Relative motion from previous odom pose to current odom pose.
+        Eigen::Affine3f T_delta = T_odom_prev.inverse() * T_odom_current;
+
+        // Current corrected global/map pose.
+        Eigen::Affine3f T_global = pose_to_eigen(global_point);
+
+        // Apply odometry increment in the robot/local trajectory frame.
+        T_global = T_global * T_delta;
+
+        eigen_to_pose(T_global, global_point);
     }
     pcl::PointCloud<pcl::PointXYZ> get_local_pointcloud(geometry_msgs::msg::Pose map_pose, double radius){
         pcl::PointCloud<pcl::PointXYZ> output;
